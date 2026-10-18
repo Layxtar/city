@@ -5,7 +5,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.io.File
-import java.io.InputStream
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.time.Instant
@@ -38,19 +37,28 @@ object CryptoAndSyncManager {
         }
     }
 
-    // Безопасный запуск команд через Shizuku Binder без приватных ошибок компиляции
+    // Безопасный запуск через рефлексию Shizuku, обходящий любые ошибки видимости компилятора
     fun execSh(command: String): Pair<Int, String> {
         return try {
-            val binder = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
-            val inputStream = binder.inputStream
-            val output = inputStream.bufferedReader().readText()
-            val code = binder.waitFor()
+            val method = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::java,
+                String::java
+            )
+            method.isAccessible = true
+            val process = method.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
+            val output = process.inputStream.bufferedReader().readText()
+            val code = process.waitFor()
             code to output
         } catch (e: Exception) {
-            // Запасной вариант через Runtime, если Shizuku-binder занят
-            val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
-            val out = p.inputStream.bufferedReader().readText()
-            p.waitFor() to out
+            try {
+                val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+                val out = p.inputStream.bufferedReader().readText()
+                p.waitFor() to out
+            } catch (ex: Exception) {
+                -1 to (ex.message ?: "Unknown error")
+            }
         }
     }
 
