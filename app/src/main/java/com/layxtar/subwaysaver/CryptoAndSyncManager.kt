@@ -1,269 +1,474 @@
 package com.layxtar.subwaysaver
 
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import android.content.pm.PackageManager
 import org.json.JSONArray
 import org.json.JSONObject
+import rikka.shizuku.Shizuku
 import java.io.File
+import java.nio.ByteBuffer
+import java.security.MessageDigest
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import javax.crypto.Cipher
+import javax.crypto.spec.SecretKeySpec
 
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    UltimateEditorApp(this)
-                }
+object CryptoAndSyncManager {
+
+    const val PKG_CITY = "com.sybogames.subway.surfers.game"
+    const val PKG_CLASSIC = "com.kiloo.subwaysurf"
+
+    private val CITY_PATHS = listOf(
+        "/storage/emulated/0/Android/data/$PKG_CITY/files/enc/profile",
+        "/storage/emulated/0/Android/data/$PKG_CITY/files/enc",
+        "/storage/emulated/0/Android/data/$PKG_CITY/files/profile",
+        "/data/data/$PKG_CITY/files/enc/profile"
+    )
+
+    fun checkShizukuPermission(log: (String) -> Unit): Boolean {
+        if (!Shizuku.pingBinder()) {
+            log("❌ Shizuku не запущен или нет связи с сервером (pingBinder = false)")
+            return false
+        }
+        val hasPerm = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        if (hasPerm) {
+            log("✅ Разрешение Shizuku уже получено")
+            return true
+        } else {
+            log("⚠️ Запрос разрешения Shizuku...")
+            try {
+                Shizuku.requestPermission(1001)
+            } catch (e: Exception) {
+                log("❌ Ошибка запроса разрешения: ${e.message}")
+            }
+            return false
+        }
+    }
+
+    fun execSh(command: String, log: (String) -> Unit): Pair<Int, String> {
+        return try {
+            val method = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java
+            )
+            method.isAccessible = true
+            val process = method.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
+            val output = process.inputStream.bufferedReader().readText()
+            val errOutput = process.errorStream.bufferedReader().readText()
+            val code = process.waitFor()
+            if (errOutput.isNotEmpty()) {
+                log("⚙️ [Shizuku stderr]: $errOutput")
+            }
+            code to output
+        } catch (e: Exception) {
+            log("⚠️ Ошибка рефлексии Shizuku: ${e.message}. Пробуем через Runtime.exec...")
+            try {
+                val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+                val out = p.inputStream.bufferedReader().readText()
+                val code = p.waitFor()
+                code to out
+            } catch (ex: Exception) {
+                log("❌ Ошибка выполнения shell: ${ex.message}")
+                -1 to (ex.message ?: "Unknown error")
             }
         }
     }
-}
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun UltimateEditorApp(activity: ComponentActivity) {
-    var selectedTab by remember { mutableIntStateOf(0) }
-    var logs by remember { mutableStateOf("🔄 Приложение запущено. Ожидание действий...\n") }
-
-    fun log(msg: String) {
-        logs = "$msg\n$logs"
-    }
-
-    var rawFileBytes by remember { mutableStateOf<ByteArray?>(null) }
-    var containerJson by remember { mutableStateOf<JSONObject?>(null) }
-    var profileJson by remember { mutableStateOf<JSONObject?>(null) }
-    var detectedCityPath by remember { mutableStateOf<String?>(null) }
-
-    val currencyStates = remember { mutableStateMapOf<Long, String>() }
-
-    var playerName by remember { mutableStateOf("Layxtar") }
-    var playerTag by remember { mutableStateOf("9CVYN655YJEZHG") }
-    var playerLevel by remember { mutableStateOf("50") }
-    var playerXp by remember { mutableStateOf("99999") }
-    var globalMultiplier by remember { mutableStateOf("0") }
-    var boostedMultiplier by remember { mutableStateOf("3") }
-    var leaderboardBestScore by remember { mutableStateOf("99999999") }
-    var selectedSurferId by remember { mutableLongStateOf(-496667767L) }
-    var selectedBoardId by remember { mutableLongStateOf(1711310740L) }
-    var crewSlot1 by remember { mutableLongStateOf(1804257387L) }
-    var crewSlot2 by remember { mutableLongStateOf(1614866432L) }
-    var crewSlot3 by remember { mutableLongStateOf(852717139L) }
-
-    var seasonPurchased by remember { mutableStateOf(true) }
-    var seasonPoints by remember { mutableStateOf("15000") }
-    var selectedSeasonId by remember { mutableStateOf(GameDatabase.SEASONS.first().first) }
-    var dealAmountInput by remember { mutableStateOf("9999") }
-
-    var classicCoins by remember { mutableStateOf("99999999") }
-    var classicKeys by remember { mutableStateOf("9999999") }
-    var classicBoards by remember { mutableStateOf("99999") }
-    var classicBoosters by remember { mutableStateOf("9999") }
-    var rawJsonText by remember { mutableStateOf("") }
-
-    fun refreshUIFromProfile(prof: JSONObject) {
-        val wallet = prof.optJSONArray("wallet") ?: JSONArray()
-        for ((tag, _) in GameDatabase.CURRENCIES) currencyStates[tag] = "0"
-        for (i in 0 until wallet.length()) {
-            val item = wallet.getJSONObject(i)
-            currencyStates[item.getLong("dataTag")] = item.getLong("count").toString()
+    fun findCitySavePath(log: (String) -> Unit): String? {
+        log("🔍 Поиск файла сохранения в директориях игры...")
+        for (path in CITY_PATHS) {
+            val cmd = "if [ -f '$path' ]; then echo 'FILE'; elif [ -d '$path' ]; then ls -1 '$path' | head -n 1; fi"
+            val (code, out) = execSh(cmd, log)
+            log("📁 Проверка пути $path -> код: $code, ответ: '${out.trim()}'")
+            if (code == 0 && out.trim() == "FILE") {
+                log("🎯 Найден файл сохранения: $path")
+                return path
+            }
+            if (code == 0 && out.trim().isNotEmpty()) {
+                val resolved = "$path/${out.trim()}"
+                log("🎯 Найден файл внутри папки: $resolved")
+                return resolved
+            }
         }
-        val online = prof.optJSONObject("onlinePlayerProfile")
-        playerName = online?.optString("name", "Layxtar") ?: "Layxtar"
-        playerTag = online?.optString("tag", "9CVYN655YJEZHG") ?: "9CVYN655YJEZHG"
-        playerLevel = prof.optInt("level", 50).toString()
-        playerXp = prof.optInt("xp", 9999).toString()
-        globalMultiplier = prof.optInt("globalScoreRunMultiplier", 0).toString()
-        boostedMultiplier = prof.optJSONObject("boostedRunMultiplier")?.optInt("runMultiplier", 3)?.toString() ?: "3"
-        selectedSurferId = prof.optLong("character", -496667767L)
-        selectedBoardId = prof.optLong("selectedBoard", 1711310740L)
-        rawJsonText = prof.toString(2)
+        log("❌ Автоматический поиск не нашёл файл. Проверьте, установлена ли игра и запущен ли уровень.")
+        return null
     }
 
-    fun applyUIToProfile(prof: JSONObject) {
-        val wallet = JSONArray()
-        for ((tag, _) in GameDatabase.CURRENCIES) {
-            val count = currencyStates[tag]?.toLongOrNull() ?: 0L
-            wallet.put(JSONObject().put("dataTag", tag).put("count", count))
+    fun pullSaveFile(remotePath: String, localTempFile: File, packageName: String, log: (String) -> Unit): Boolean {
+        log("🛑 Принудительная остановка игры ($packageName)...")
+        execSh("am force-stop $packageName", log)
+
+        log("📥 Копирование файла из: $remotePath")
+        val (code, out) = execSh("cat '$remotePath' > '${localTempFile.absolutePath}'", log)
+        log("📥 Результат cat: код $code, вывод: $out")
+
+        val exists = localTempFile.exists()
+        val len = if (exists) localTempFile.length() else 0L
+        log("📦 Временный файл создан: $exists, размер: $len байт")
+
+        return code == 0 && exists && len > 32
+    }
+
+    fun pushAndSyncSaveFile(localTempFile: File, remotePath: String, packageName: String, log: (String) -> Unit): Boolean {
+        log("🛑 Принудительная остановка игры перед записью...")
+        execSh("am force-stop $packageName", log)
+
+        log("📑 Создание бэкапа оригинального файла...")
+        execSh("cp '$remotePath' '$remotePath.bak_editor'", log)
+
+        log("💾 Запись измененного файла на устройство...")
+        val (code, out) = execSh("cat '${localTempFile.absolutePath}' > '$remotePath'", log)
+        log("💾 Результат записи cat: код $code, вывод: $out")
+
+        val parentDir = File(remotePath).parent
+        execSh("rm -f '$parentDir'/*.tmp '$parentDir'/*.temp", log)
+
+        return code == 0
+    }
+
+    fun decryptCityProfile(rawBytes: ByteArray): Pair<JSONObject, JSONObject> {
+        require(rawBytes.size >= 32) { "Файл слишком мал (< 32 байт)" }
+        val iv = rawBytes.copyOfRange(0, 16)
+        val key = rawBytes.copyOfRange(16, 32)
+        val encrypted = rawBytes.copyOfRange(32, rawBytes.size)
+
+        val cipher = Cipher.getInstance("AES/ECB/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"))
+
+        val counter = iv.clone()
+        val decrypted = ByteArray(encrypted.size)
+
+        for (offset in encrypted.indices step 16) {
+            val blockSize = minOf(16, encrypted.size - offset)
+            val encryptedCounter = cipher.doFinal(counter)
+            for (i in 0 until blockSize) {
+                decrypted[offset + i] = (encrypted[offset + i].toInt() xor encryptedCounter[i].toInt()).toByte()
+            }
+            incrementCounter(counter)
         }
-        prof.put("wallet", wallet)
 
-        val onlineProf = prof.optJSONObject("onlinePlayerProfile") ?: JSONObject()
-        onlineProf.put("name", playerName)
-        onlineProf.put("tag", playerTag)
-        onlineProf.put("renameableAt", "0001-01-01T00:00:00")
-        prof.put("onlinePlayerProfile", onlineProf)
-
-        prof.put("level", playerLevel.toIntOrNull() ?: 50)
-        prof.put("xp", playerXp.toIntOrNull() ?: 9999)
-        prof.put("globalScoreRunMultiplier", globalMultiplier.toIntOrNull() ?: 0)
-        prof.put("boostedRunMultiplier", JSONObject().put("runMultiplier", boostedMultiplier.toIntOrNull() ?: 3))
-        prof.put("character", selectedSurferId)
-        prof.put("selectedBoard", selectedBoardId)
-        prof.put("seasonPassPurchased", seasonPurchased)
-        prof.put("seasonPassPoints", seasonPoints.toIntOrNull() ?: 15000)
-        prof.put("seasonPassId", selectedSeasonId)
-        rawJsonText = prof.toString(2)
+        val containerJson = JSONObject(String(decrypted, Charsets.UTF_8))
+        val innerProfileJson = JSONObject(containerJson.getString("profile"))
+        return containerJson to innerProfileJson
     }
 
-    Scaffold(
-        topBar = {
-            Column {
-                TopAppBar(title = { Text("Subway Save Editor (DEBUG)", fontWeight = FontWeight.Bold) })
-                ScrollableTabRow(selectedTabIndex = selectedTab) {
-                    listOf("💰 Валюта", "⚡ Читы", "🐷 Копилка", "🎢 Трассы", "👥 Профиль", "🛒 Сезон", "🛹 Classic", "📜 Логи & JSON").forEachIndexed { idx, title ->
-                        Tab(selected = selectedTab == idx, onClick = { selectedTab = idx }, text = { Text(title) })
+    fun encryptCityProfile(originalRawBytes: ByteArray, containerJson: JSONObject, innerProfileJson: JSONObject): ByteArray {
+        val iv = originalRawBytes.copyOfRange(0, 16)
+        val key = originalRawBytes.copyOfRange(16, 32)
+
+        val futureTime = Instant.now().plusSeconds(300)
+        val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSS'Z'").withZone(ZoneOffset.UTC)
+        containerJson.put("lastUpdated", formatter.format(futureTime))
+        containerJson.put("version", 8)
+        containerJson.put("profile", innerProfileJson.toString())
+        containerJson.put("hash", JSONObject.NULL)
+
+        innerProfileJson.put("cloudsave", JSONObject().put("askedToLinkAccount", false))
+        val flags = innerProfileJson.optJSONObject("flags") ?: JSONObject()
+        flags.put("CloudSave_AskedToLinkAccount", true)
+        flags.put("noadsbutton", true)
+        innerProfileJson.put("flags", flags)
+
+        val plainBytes = containerJson.toString().toByteArray(Charsets.UTF_8)
+        val cipher = Cipher.getInstance("AES/ECB/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"))
+
+        val counter = iv.clone()
+        val encrypted = ByteArray(plainBytes.size)
+
+        for (offset in plainBytes.indices step 16) {
+            val blockSize = minOf(16, plainBytes.size - offset)
+            val encryptedCounter = cipher.doFinal(counter)
+            for (i in 0 until blockSize) {
+                encrypted[offset + i] = (plainBytes[offset + i].toInt() xor encryptedCounter[i].toInt()).toByte()
+            }
+            incrementCounter(counter)
+        }
+
+        return ByteBuffer.allocate(32 + encrypted.size)
+            .put(iv)
+            .put(key)
+            .put(encrypted)
+            .array()
+    }
+
+    private fun incrementCounter(counter: ByteArray) {
+        var carry = 1
+        for (i in 15 downTo 8) {
+            val s = (counter[i].toInt() and 0xFF) + carry
+            counter[i] = (s and 0xFF).toByte()
+            carry = s ushr 8
+            if (carry == 0) break
+        }
+    }
+
+    fun unlockAndMaxAllSurfers(profile: JSONObject, customHighScore: Long = 12500000L) {
+        val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
+        val existingSkins = mutableMapOf<Long, Int>()
+        for (i in 0 until currentArray.length()) {
+            val obj = currentArray.getJSONObject(i)
+            existingSkins[obj.getLong("id")] = obj.optInt("selectedSkin", 0)
+        }
+        val newArray = JSONArray()
+        for ((id, _) in GameDatabase.SURFERS) {
+            newArray.put(JSONObject().apply {
+                put("id", id)
+                put("level", 20)
+                put("isUnlocked", true)
+                put("wasSeen", true)
+                put("highScore", customHighScore)
+                put("selectedSkin", existingSkins[id] ?: 0)
+            })
+        }
+        profile.put("surferProfiles", newArray)
+        val counters = profile.optJSONArray("counters") ?: JSONArray()
+        for ((id, _) in GameDatabase.SURFERS) {
+            upsertCounter(counters, "LastUnlockedTierCounter", "DataTag($id)", 40)
+            upsertCounter(counters, "ScoreLadderUnlockTierCounter", "DataTag($id)", 40)
+        }
+        profile.put("counters", counters)
+    }
+
+    fun unlockAndMaxAllBoards(profile: JSONObject) {
+        val newArray = JSONArray()
+        for ((id, _) in GameDatabase.BOARDS) {
+            newArray.put(JSONObject().apply {
+                put("id", id)
+                put("level", 20)
+                put("isUnlocked", true)
+                put("wasSeen", true)
+            })
+        }
+        profile.put("boardProfiles", newArray)
+    }
+
+    fun unlockAllSkinsAndAvatars(profile: JSONObject) {
+        val skinsArray = JSONArray()
+        for (skinId in GameDatabase.ALL_SKINS) {
+            skinsArray.put(JSONObject().apply {
+                put("id", skinId)
+                put("isUnlocked", true)
+                put("wasSeen", true)
+            })
+        }
+        profile.put("surferSkinProfiles", skinsArray)
+
+        val avatarsArray = JSONArray()
+        for (avatarId in GameDatabase.ALL_AVATARS) {
+            avatarsArray.put(JSONObject().put("id", avatarId))
+        }
+        profile.put("avatarProfiles", avatarsArray)
+    }
+
+    fun completeAllDistrictsAndStages(profile: JSONObject) {
+        val distProf = JSONArray()
+        val campDistProf = JSONArray()
+        for (dId in GameDatabase.DISTRICTS) {
+            distProf.put(JSONObject().put("id", dId).put("isUnlocked", true).put("wasSeen", true))
+            campDistProf.put(JSONObject().put("id", dId).put("isUnlocked", true))
+        }
+        for (num in 1..6) {
+            distProf.put(JSONObject().put("id", num).put("isUnlocked", true).put("wasSeen", true))
+        }
+        profile.put("districtProfiles", distProf)
+        profile.put("campaignDistrictProfiles", campDistProf)
+
+        val goals = profile.optJSONArray("goals") ?: JSONArray()
+        val existingGoalIds = mutableSetOf<String>()
+        for (i in 0 until goals.length()) {
+            val g = goals.getJSONObject(i)
+            g.put("completed", true)
+            existingGoalIds.add(g.getString("id"))
+        }
+
+        val stageCounts = mapOf(1 to 32, 2 to 36, 3 to 36, 4 to 36, 5 to 36, 6 to 20)
+        for ((districtNum, maxStage) in stageCounts) {
+            for (stage in 1..maxStage) {
+                for (goal in 1..3) {
+                    val gId = "district${districtNum}_stage${stage}_goal$goal"
+                    if (existingGoalIds.add(gId)) {
+                        goals.put(JSONObject().put("id", gId).put("completed", true))
                     }
                 }
             }
-        },
-        bottomBar = {
-            if (selectedTab != 6) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            log("=== НАЧАЛО ЗАГРУЗКИ CITY ===")
-                            if (!CryptoAndSyncManager.checkShizukuPermission(::log)) {
-                                log("⚠️ Требуется выдать разрешение в Shizuku!")
-                                return@Button
-                            }
-                            val path = CryptoAndSyncManager.findCitySavePath(::log)
-                            if (path == null) {
-                                log("❌ Не удалось найти файл сохранения автоматически.")
-                                return@Button
-                            }
-                            detectedCityPath = path
-                            val tempFile = File(activity.cacheDir, "city_profile.bin")
-                            if (CryptoAndSyncManager.pullSaveFile(path, tempFile, CryptoAndSyncManager.PKG_CITY, ::log)) {
-                                val bytes = tempFile.readBytes()
-                                val (cont, prof) = CryptoAndSyncManager.decryptCityProfile(bytes)
-                                rawFileBytes = bytes
-                                containerJson = cont
-                                profileJson = prof
-                                refreshUIFromProfile(prof)
-                                log("✅ УСПЕХ: Файл успешно расшифрован и загружен!")
-                            } else {
-                                log("❌ Ошибка чтения файла через Shizuku.")
-                            }
-                        }
-                    ) { Text("📥 Загрузить City") }
+        }
+        profile.put("goals", goals)
+    }
 
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        enabled = profileJson != null,
-                        onClick = {
-                            log("=== НАЧАЛО СИНХРОНИЗАЦИИ ===")
-                            val prof = profileJson ?: return@Button
-                            val cont = containerJson ?: return@Button
-                            val raw = rawFileBytes ?: return@Button
-                            val path = detectedCityPath ?: return@Button
+    fun injectAllPaidPassesAndDonations(profile: JSONObject) {
+        val purchaseHistory = profile.optJSONObject("purchaseHistory") ?: JSONObject()
+        val nowIso = Instant.now().toString()
+        for (productId in GameDatabase.ALL_IAP_PURCHASES) {
+            purchaseHistory.put(productId, JSONObject().apply {
+                put("PurchaseCount", 1)
+                put("PurchaseDates", JSONArray().put(nowIso))
+            })
+        }
+        profile.put("purchaseHistory", purchaseHistory)
+        profile.put("seasonPassPurchased", true)
+        profile.put("hasSeenPremiumPassActivation", true)
+        profile.put("lifetimeMaxPurchasePrice", 99.99)
 
-                            applyUIToProfile(prof)
-                            val encryptedBytes = CryptoAndSyncManager.encryptCityProfile(raw, cont, prof)
-                            val tempOut = File(activity.cacheDir, "city_profile_out.bin")
-                            tempOut.writeBytes(encryptedBytes)
+        val counters = profile.optJSONArray("counters") ?: JSONArray()
+        for (notifId in GameDatabase.HOME_OFFER_NOTIFICATION_IDS) {
+            upsertCounter(counters, "HomeOfferNotificationViewCounter", notifId, 999)
+        }
+        profile.put("counters", counters)
+    }
 
-                            val ok = CryptoAndSyncManager.pushAndSyncSaveFile(tempOut, path, CryptoAndSyncManager.PKG_CITY, ::log)
-                            if (ok) log("✅ УСПЕХ: Файл записан и синхронизирован с игрой!")
-                            else log("❌ Ошибка записи через Shizuku.")
-                        }
-                    ) { Text("💾 Синхронизировать") }
-                }
+    fun configurePiggyBank(profile: JSONObject, piggyId: String, missionId: Long, progressAmount: Int, isFilled: Boolean) {
+        profile.put("piggyBank", JSONObject().apply {
+            put("currentId", piggyId)
+            put("lastSeenProgress", progressAmount)
+            put("skippedCount", 0)
+            put("lastSentAnalyticsProgress", 10)
+            put("isFilled", isFilled)
+        })
+        val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
+        var found = false
+        for (i in 0 until missions.length()) {
+            val m = missions.getJSONObject(i)
+            if (m.optString("featureType") == "PiggyBank" || m.optLong("id") == missionId) {
+                m.put("id", missionId)
+                m.put("progress", progressAmount)
+                m.put("isComplete", isFilled)
+                m.put("isClaimed", false)
+                m.put("featureType", "PiggyBank")
+                found = true
             }
         }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Spacer(modifier = Modifier.height(4.dp))
+        if (!found) {
+            missions.put(JSONObject().apply {
+                put("id", missionId)
+                put("progress", progressAmount)
+                put("isComplete", isFilled)
+                put("isClaimed", false)
+                put("creationUnixTimestamp", 0)
+                put("creationUnixTimestampSeconds", Instant.now().epochSecond)
+                put("featureType", "PiggyBank")
+            })
+        }
+        profile.put("missionProgresses", missions)
+    }
 
-            when (selectedTab) {
-                0 -> {
-                    Button(modifier = Modifier.fillMaxWidth(), onClick = {
-                        GameDatabase.CURRENCIES.forEach { (tag, _) -> currencyStates[tag] = "9999999" }
-                        log("💎 Валюты заполнены на 9 999 999")
-                    }) { Text("💎 Заполнить валюты по 9 999 999") }
+    fun activateScheduledCampaign(profile: JSONObject, campaignId: String) {
+        profile.put("activeScheduledCampaignProfile", JSONObject().apply {
+            put("activeScheduledCampaignId", campaignId)
+            put("playableSurfers", JSONArray().apply {
+                put(-1836944478L); put(1900660162L); put(2129411796L); put(-496667767L)
+            })
+        })
+        val goals = profile.optJSONArray("goals") ?: JSONArray()
+        for (stage in 1..7) {
+            for (goal in 1..3) {
+                goals.put(JSONObject().put("id", "${campaignId}_stage${stage}_goal$goal").put("completed", true))
+            }
+        }
+        profile.put("goals", goals)
+    }
 
-                    GameDatabase.CURRENCIES.forEach { (tag, label) ->
-                        OutlinedTextField(
-                            value = currencyStates[tag] ?: "0",
-                            onValueChange = { currencyStates[tag] = it },
-                            label = { Text(label) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-                1 -> {
-                    Button(modifier = Modifier.fillMaxWidth(), onClick = {
-                        profileJson?.let {
-                            CryptoAndSyncManager.unlockAndMaxAllSurfers(it)
-                            CryptoAndSyncManager.unlockAndMaxAllBoards(it)
-                            CryptoAndSyncManager.unlockAllSkinsAndAvatars(it)
-                            CryptoAndSyncManager.completeAllDistrictsAndStages(it)
-                            CryptoAndSyncManager.injectAllPaidPassesAndDonations(it)
-                            CryptoAndSyncManager.unlockSecretStarsAndAchievements(it)
-                            CryptoAndSyncManager.hackDailyDealsAndAdRewards(it)
-                            refreshUIFromProfile(it)
-                            log("👑 Активирован GOD-MODE: Всё разблокировано и прокачано!")
-                        }
-                    }) { Text("👑 АКТИВИРОВАТЬ GOD-MODE (Всё на максимум)") }
-                }
-                7 -> {
-                    Text("📜 Логи выполнения в реальном времени:", fontWeight = FontWeight.Bold)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(250.dp)
-                            .background(Color.Black)
-                            .padding(8.dp)
-                    ) {
-                        Text(
-                            text = logs,
-                            color = Color.Green,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
-                            modifier = Modifier.verticalScroll(rememberScrollState())
-                        )
-                    }
+    fun activateAndCompleteQuest(profile: JSONObject, questId: String, missionId: Long) {
+        val quests = profile.optJSONArray("quest") ?: JSONArray()
+        quests.put(JSONObject().apply {
+            put("QuestID", questId)
+            put("AnalyticID", "${questId}_editor_unlock")
+            put("Amount", 50000)
+            put("TimerID", -2010162359)
+            put("SavableItems", JSONArray())
+            put("PendingProgress", 50000)
+        })
+        profile.put("quest", quests)
 
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = rawJsonText,
-                        onValueChange = { rawJsonText = it },
-                        label = { Text("Сырой JSON профиля") },
-                        modifier = Modifier.fillMaxWidth().height(200.dp)
-                    )
-                }
-                else -> {
-                    Text("Используйте вкладки Валюта, Читы или Логи.")
+        val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
+        missions.put(JSONObject().apply {
+            put("id", missionId)
+            put("progress", 50000)
+            put("isComplete", true)
+            put("isClaimed", false)
+            put("creationUnixTimestamp", 0)
+            put("creationUnixTimestampSeconds", Instant.now().epochSecond)
+            put("featureType", "Quest")
+        })
+        profile.put("missionProgresses", missions)
+    }
+
+    fun hackDailyDealsAndAdRewards(profile: JSONObject, dealRewardAmount: Int = 9999) {
+        val customTags = longArrayOf(-1878560402L, -1509662453L, -1085419483L, -635142441L, -2008679869L, 326719861L)
+        val dealsArray = JSONArray()
+        for (i in 0 until 6) {
+            dealsArray.put(JSONObject().apply {
+                put("slotId", "daily_deal_${i + 1}")
+                put("slotSeed", 10 + i)
+                put("itemDatatag", customTags[i])
+                put("amount", dealRewardAmount)
+            })
+        }
+        profile.put("dailyDeal", JSONObject().put("dailyDeals", dealsArray))
+
+        val adRewards = JSONArray()
+        val adTags = longArrayOf(-635142441L, -2008679869L, 326719861L, 1669706535L, -633437229L, -1085419483L, -1878560402L, 722065917L, -1509662453L)
+        for (tag in adTags) {
+            adRewards.put(JSONObject().apply {
+                put("RewardType", tag)
+                put("RewardValue", 99999)
+                put("Claimed", false)
+            })
+        }
+        profile.put("dailyAdRewards", adRewards)
+    }
+
+    fun unlockSecretStarsAndAchievements(profile: JSONObject) {
+        val counters = profile.optJSONArray("counters") ?: JSONArray()
+        for (starTag in GameDatabase.SECRET_STAR_TAGS) {
+            upsertCounter(counters, "SecretStarCounter", "DataTag($starTag)", 10)
+        }
+        upsertCounter(counters, "PityCounter", "mysterybox_regular", 9)
+        upsertCounter(counters, "PityCounter", "shop.box.ad", 9)
+        upsertCounter(counters, "PityCounter", "shop.box.ad.board", 9)
+        upsertCounter(counters, "PityCounter", "shop.box.ad.repeatable", 9)
+        profile.put("counters", counters)
+
+        val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
+        for ((achId, target) in GameDatabase.ACHIEVEMENT_MISSIONS) {
+            var exists = false
+            for (i in 0 until missions.length()) {
+                val m = missions.getJSONObject(i)
+                if (m.optLong("id") == achId) {
+                    m.put("progress", target)
+                    m.put("isComplete", true)
+                    m.put("isClaimed", false)
+                    exists = true
                 }
             }
-            Spacer(modifier = Modifier.height(90.dp))
+            if (!exists) {
+                missions.put(JSONObject().apply {
+                    put("id", achId)
+                    put("progress", target)
+                    put("isComplete", true)
+                    put("isClaimed", false)
+                    put("creationUnixTimestamp", 0)
+                    put("creationUnixTimestampSeconds", Instant.now().epochSecond)
+                    put("featureType", "Achievement")
+                })
+            }
         }
+        profile.put("missionProgresses", missions)
+    }
+
+    private fun upsertCounter(counters: JSONArray, type: String, id: String, count: Int) {
+        for (i in 0 until counters.length()) {
+            val c = counters.getJSONObject(i)
+            if (c.optString("CounterType") == type && c.optString("Id") == id) {
+                c.put("Count", count)
+                return
+            }
+        }
+        counters.put(JSONObject().apply {
+            put("CounterType", type)
+            put("Id", id)
+            put("Count", count)
+        })
     }
 }
