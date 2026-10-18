@@ -25,16 +25,44 @@ object ClassicCryptoAndSyncManager {
 
     private val ZERO_IV = ByteArray(16)
 
-    fun decryptClassicFile(rawBytes: ByteArray): JSONObject {
+        fun decryptClassicFile(rawBytes: ByteArray): JSONObject {
         val textAttempt = runCatching { String(rawBytes, Charsets.UTF_8).trim() }.getOrNull()
+        
+        // Если файл уже является валидным JSON (начинается с '{'), разбираем его напрямую
         if (textAttempt != null && textAttempt.startsWith("{")) {
-            val outer = JSONObject(textAttempt)
-            return if (outer.has("data") && outer.opt("data") is String) {
-                JSONObject(outer.getString("data"))
-            } else {
-                outer
+            return try {
+                val outer = JSONObject(textAttempt)
+                // Если внутри есть зашифрованное/обернутое поле data в виде строки
+                if (outer.has("data") && outer.opt("data") is String) {
+                    val innerStr = outer.getString("data")
+                    if (innerStr.startsWith("{")) {
+                        JSONObject(innerStr)
+                    } else {
+                        // Если data закодирована иначе или это просто строка-значение
+                        outer
+                    }
+                } else {
+                    outer
+                }
+            } catch (e: Exception) {
+                JSONObject()
             }
         }
+
+        // Если файл зашифрован через AES-CBC
+        return try {
+            if (rawBytes.size <= 24) return JSONObject()
+            val cipherBytes = rawBytes.copyOfRange(24, rawBytes.size)
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(CLASSIC_AES_KEY, "AES"), IvParameterSpec(ZERO_IV))
+            val decryptedBytes = cipher.doFinal(cipherBytes)
+            JSONObject(String(decryptedBytes, Charsets.UTF_8))
+        } catch (e: Exception) {
+            // Фолбек на случай несовпадения формата, чтобы приложение не падало
+            JSONObject()
+        }
+    }
+
 
         require(rawBytes.size > 24) { "Файл Classic слишком мал (${rawBytes.size} байт)" }
         val cipherBytes = rawBytes.copyOfRange(24, rawBytes.size)
