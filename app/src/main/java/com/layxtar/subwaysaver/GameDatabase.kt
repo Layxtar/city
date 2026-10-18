@@ -126,6 +126,16 @@ object GameDatabase {
         754815718L, -48406815L, 1011666857L, -846857L, -530046136L, 958198924L
     )
 
+    // Все виды ежедневных и ивентовых триалов (забегов) в Subway City
+    val DAILY_TRIALS = listOf(
+        "trial_coins" to "🪙 Coin Blitz (Золотая лихорадка)",
+        "trial_surfer_exp" to "🧬 Surfer Token Trial (Испытание сёрферов)",
+        "trial_board_exp" to "🛹 Board Token Trial (Испытание досок)",
+        "trial_halloween_special" to "🎃 Halloween Trial (Хэллоуинский забег)",
+        "trial_mystery_box" to "🎁 Mystery Box Trial (Забег за сундуками)",
+        "trial_extreme_speed" to "⚡ Speed Demon Trial (Экстремальная скорость)"
+    )
+
     val PIGGY_BANKS = listOf(
         "shop.piggybankmlp7.3" to (-2000200805L to "Ур. 7.3 MAX (50k / 250k Upsell, 5x)"),
         "shop.piggybankmlp6.3" to (-1933733375L to "Ур. 6.3 (50k / 250k Upsell, 5x)"),
@@ -170,7 +180,6 @@ object GameDatabase {
         "soda-time" to (-1571357937L to "🥤 Soda Time (Время газировки)")
     )
 
-    // Полный каталог доната с понятными названиями для ручной разблокировки
     val IAP_CATALOG = listOf(
         "districttrial.premiumladder.001" to "🗺️ Платный пропуск трассы #1 (Бруклин — Growth Fund 1)",
         "districttrial.premiumladder.002" to "🗺️ Платный пропуск трассы #2 (Гавань — Growth Fund 2)",
@@ -180,6 +189,9 @@ object GameDatabase {
         "districttrial.premiumladder.006" to "🗺️ Платный пропуск трассы #6 (Хэллоуин — Growth Fund 6)",
         "sample.remove.ads" to "🚫 Полное отключение рекламы (Remove Ads)",
         "premium_pass" to "🎟️ Премиум Сезонный Пропуск (Premium Season Pass)",
+        "shop.piggybankmlp7.3" to "🐷 Бесплатный выкуп Копилки 7.3 MAX (250k монет)",
+        "shop.piggybankmlp6.3" to "🐷 Бесплатный выкуп Копилки 6.3 (250k монет)",
+        "shop.piggybankmlp5.3" to "🐷 Бесплатный выкуп Копилки 5.3 (250k монет)",
         "shop.offer.lucy.outfitbundle.001" to "🧛‍♀️ Хэллоуинский набор Люси (Lucy Outfit Bundle)",
         "shop.offer.subsurfclassicboardunlock001" to "🛹 Доска Classic (Google Play Эксклюзив)",
         "shop.offer.jake_trackstar_outfit" to "👟 Костюм Jake Trackstar (Эксклюзив)",
@@ -207,34 +219,7 @@ object GameDatabase {
         "shop.avatars.smiling_horse" to "🐴 Аватар: Улыбающаяся Лошадь",
         "shop.avatars.werewolf_mask" to "🐺 Аватар: Маска Оборотня",
         "shop.avatars.calavera_skull" to "💀 Аватар: Череп Калавера",
-        "shop.avatars.candy_bat" to "🦇 Аватар: Конфетная Летучая Мышь",
-        "shop.offer.jaketokenbundle001" to "🧬 Пакет жетонов Jake #1",
-        "shop.offer.jaketokenbundle002" to "🧬 Пакет жетонов Jake #2",
-        "shop.offer.trickytokenbundle001" to "🧬 Пакет жетонов Tricky #1",
-        "shop.offer.trickytokenbundle002" to "🧬 Пакет жетонов Tricky #2",
-        "shop.offer.freshtokenbundle001" to "🧬 Пакет жетонов Fresh #1",
-        "shop.offer.freshtokenbundle002" to "🧬 Пакет жетонов Fresh #2",
-        "shop.offer.yutanitokenbundle001" to "🧬 Пакет жетонов Yutani #1",
-        "shop.offer.yutanitokenbundle002" to "🧬 Пакет жетонов Yutani #2",
-        "shop.offer.billytokenbundle001" to "🧬 Пакет жетонов Billy #1",
-        "shop.offer.billytokenbundle002" to "🧬 Пакет жетонов Billy #2",
-        "shop.offer.nickytokenbundle002" to "🧬 Пакет жетонов Nicky",
-        "shop.offer.rosalitatokenbundle002" to "🧬 Пакет жетонов Rosalita",
-        "shop.offer.missmaiatokenbundle002" to "🧬 Пакет жетонов Miss Maia",
-        "shop.offer.tagbottokenbundle002" to "🧬 Пакет жетонов Tagbot",
-        "shop.offer.spiketokenbundle002" to "🧬 Пакет жетонов Spike",
-        "shop.offer.ellatokenbundle002" to "🧬 Пакет жетонов Ella",
-        "shop.offer.tashatokenbundle002" to "🧬 Пакет жетонов Tasha",
-        "shop.offer.lilahtokenbundle002" to "🧬 Пакет жетонов Lilah",
-        "shop.offer.ninjatokenbundle002" to "🧬 Пакет жетонов NinjaOne",
-        "shop.offer.zaratokenbundle002" to "🧬 Пакет жетонов Zara",
-        "shop.offer.jaewootokenbundle002" to "🧬 Пакет жетонов Jaewoo",
-        "shop.offer.ashtokenbundle002" to "🧬 Пакет жетонов Ash",
-        "shop.offer.jennytokenbundle002" to "🧬 Пакет жетонов Jenny",
-        "shop.offer.lucytokenbundle002" to "🧬 Пакет жетонов Lucy",
-        "shop.offer.noontokenbundle002" to "🧬 Пакет жетонов Noon",
-        "shop.offer.moniquetokenbundle002" to "🧬 Пакет жетонов Monique",
-        "shop.offer.princektokenbundle002" to "🧬 Пакет жетонов Prince K"
+        "shop.avatars.candy_bat" to "🦇 Аватар: Конфетная Летучая Мышь"
     )
 
     val ALL_IAP_PURCHASES = IAP_CATALOG.map { it.first }
@@ -242,33 +227,7 @@ object GameDatabase {
     val HOME_OFFER_NOTIFICATION_IDS = listOf(
         "0c7a6db7-3c3b-4a6f-8f31-7c9d7c3b8d01", "1b7d5d2a-8c1a-4c6d-9f4d-0c0c4fd3e6a2",
         "2a84b55e-7f9a-4d4b-a2b7-8f3d7b8a2d13", "4d9f1c2b-62c8-4d3e-9e2c-7a8b6c5d4e15",
-        "5e2a1b0c-2f6c-4c1d-8b7a-1c2d3e4f5a16", "6f3b2c1d-3a7d-4d2e-9c8b-2d3e4f5a6b17",
-        "7a4c3d2e-4b8e-4e3f-a9dc-3e4f5a6b7c18", "8b5d4e3f-5c9f-4f40-b0ed-4f5a6b7c8d19",
-        "9c6e5f40-6da0-4041-c1fe-5a6b7c8d9e1a", "a7d7a651-7eb1-4142-d20f-6b7c8d9e0f1b",
-        "b8e8b762-8fc2-4243-e310-7c8d9e0f1a2c", "c9f9c873-90d3-4344-f411-8d9e0f1a2b3d",
-        "d0a0d984-a1e4-4445-a512-9e0f1a2b3c4e", "e1b1ea95-b2f5-4546-b613-0f1a2b3c4d5f",
-        "f2c2fb06-c306-4647-c714-1a2b3c4d5e60", "03d30c17-d417-4748-d815-2b3c4d5e6f71",
-        "14e41d28-e528-4849-e916-3c4d5e6f7082", "25f52e39-f639-494a-f017-4d5e6f708193",
-        "36063f4a-074a-4a4b-a118-5e6f708192a4", "4717405b-185b-4b4c-b219-6f708192a3b5",
-        "5828516c-296c-4c4d-c31a-708192a3b4c6", "6939627d-3a7d-4d4e-d41b-8192a3b4c5d7",
-        "7a4a738e-4b8e-4e4f-e51c-92a3b4c5d6e8", "8b5b849f-5c9f-4f50-f61d-a3b4c5d6e7f9",
-        "9c6c95a0-6da0-4051-a71e-b4c5d6e7f801", "ad7da6b1-7eb1-4152-b81f-c5d6e7f80112",
-        "be8eb7c2-8fc2-4253-c920-d6e7f8011233", "cf9fc8d3-90d3-4354-da21-e7f801123344",
-        "d0a0d9e4-a1e4-4455-eb22-f80112334455", "e1b1eaf5-b2f5-4556-fc23-012334455667",
-        "14e41d28-e528-4859-cf26-34455667890a", "25f52e39-f639-495a-d027-455667890abc",
-        "36063f4a-074a-4a5b-e128-5667890abcde", "4717405b-185b-4b5c-f229-67890abcdef0",
-        "5828516c-296c-4c5d-a32a-7890abcdef01", "6939627d-3a7d-4d5e-b42b-890abcdef012",
-        "7a4a738e-4b8e-4e5f-c52c-90abcdef0123", "1defa511-646d-4fd0-9e6c-b375cbfaba4e",
-        "23e34fbb-13bd-49ba-85f1-a4bf8347bb97", "57a45dc2-b0ab-4889-8c7a-f7a4a18c25fa",
-        "9158f7ff-9fdf-463e-9085-5ee7f11a65b5", "e30cb274-fe98-440b-9796-e1dfbe902ac2",
-        "3ce91619-e2b2-4fb9-bb34-a9b22d49598a", "6fe0685a-727b-4c4a-ade7-b1cfac845cf1",
-        "96758b0b-b00a-4a9d-bd07-c1f5cb652c17", "7776fb3b-5a96-47b1-8c7c-4aa61592c892",
-        "1bfd27bf-41af-4de8-b498-72394330512f", "6b687778-d92f-452a-8e4a-6166b1c59301",
-        "b53e7d1b-865a-49de-8be5-e87249d47c34", "53c479c0-428d-4eff-a529-9212a15ce51c",
-        "6dc2664b-117f-42ae-b47d-646235f4c539", "9f39e522-e808-4740-9dda-ceec56e8503e",
-        "133ede8d-ba99-4e82-8d77-88665ccb5fdb", "6a4afa91-aa1f-4dfd-a188-ebf926513f34",
-        "b1bd57de-8373-4241-af3d-93b17f9d2de7", "2b694ab8-8fe1-4a3a-8f03-d4df08b0e3ec",
-        "3104d8fd-b0dd-4457-a592-cd28d7d87894"
+        "5e2a1b0c-2f6c-4c1d-8b7a-1c2d3e4f5a16", "6f3b2c1d-3a7d-4d2e-9c8b-2d3e4f5a6b17"
     )
 
     val ACHIEVEMENT_MISSIONS = listOf(
@@ -285,7 +244,6 @@ object GameDatabase {
         2127993918, -1327161860, 471277129, -1077266123, -2051997889, -1742950628
     )
 
-    // Все шаги обучения (FTUE), чтобы отключить навязчивые туториалы
     val FTUE_STEPS = listOf(
         "first_run", "surfer_upgrade", "board_unlock", "campaign_intro",
         "missions_intro", "season_pass_intro", "daily_trials_intro", "crew_intro",
