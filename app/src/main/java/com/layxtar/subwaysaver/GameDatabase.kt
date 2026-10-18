@@ -1,294 +1,855 @@
-package com.layxtar.subwaysaver
+package com.cityedit.ultimate
 
-object GameDatabase {
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.Instant
 
-    val CURRENCIES = listOf(
-        -633437229L to "🪙 Монеты (Coins)",
-        -1085419483L to "🔑 Ключи (Keys)",
-        -2008679869L to "🧬 Жетоны сёрферов (Surfer Tokens)",
-        326719861L to "🛹 Жетоны досок (Board Tokens)",
-        -1878560402L to "🎟️ Кредиты сёрферов (Surfer Credits)",
-        -1509662453L to "🎫 Кредиты досок (Board Credits)",
-        722065917L to "🗺️ Билеты кампании (Campaign Tickets)",
-        1669706535L to "⚡ Воскрешения (Revives)",
-        -635142441L to "🎃 Ивентовые конфеты (Event Tokens)"
+data class CharacterCatalogEntry(
+    val id: String,
+    val displayName: String,
+    val outfits: List<String> = listOf("default"),
+    val category: String = "Surfer"
+)
+
+data class BoardCatalogEntry(
+    val id: String,
+    val displayName: String,
+    val upgrades: List<String> = emptyList()
+)
+
+object GameContentDatabase {
+
+    // =========================================================================
+    // 1. БАЗА ДАННЫХ CLASSIC SUBWAY SURFERS (ИЗ ФАЙЛОВ ИГРЫ S125)
+    // =========================================================================
+
+    val classicCurrencies = listOf(
+        Triple("1", "Монеты (Coins)", 999_999_999),
+        Triple("2", "Ключи (Keys)", 999_999),
+        Triple("3", "Ховерборды (Hoverboards)", 999_999),
+        Triple("4", "Хедстарты (HeadStarts)", 99_999),
+        Triple("5", "Бустеры счёта (ScoreBoosters)", 99_999),
+        Triple("6", "Монеты Событий (EventCoins)", 999_999),
+        Triple("12", "Жетоны Сезона (SeasonHuntTokens)", 99_999)
     )
 
-    val SURFERS = listOf(
-        -1836944478L to "Jake (Джейк)",
-        1900660162L to "Tricky (Трики)",
-        2129411796L to "Fresh (Фреш)",
-        1614866432L to "Miss Maia (Мисс Майя)",
-        1804257387L to "NinjaOne (Ниндзя)",
-        1663244716L to "Yutani (Ютани)",
-        849273384L to "Spike (Спайк)",
-        1200047034L to "Ella (Элла)",
-        1120354844L to "Nicky / Jay (Ники)",
-        -502265868L to "Noon (Нун)",
-        581326566L to "Billy (Билли)",
-        -1505268145L to "Rosalita (Розалита)",
-        299562833L to "Tasha (Таша)",
-        -1733051898L to "Jaewoo (Джэу)",
-        1887684367L to "Tagbot (Тэгбот)",
-        852717139L to "Lucy (Люси — Сезон)",
-        -1534276928L to "V3ctor (Вектор — Сезон)",
-        -2125407733L to "Georgie (Джорджи — Сезон)",
-        823378763L to "Harini (Харини — Сезон)",
-        -518167090L to "Wei (Вэй — Сезон)",
-        -2075784936L to "Zara (Зара — Сезон)",
-        1936280213L to "Prince K (Принц Кей — Сезон)",
-        -2116248615L to "Lilah (Лайла — Скрытый)",
-        966716028L to "Ash (Эш — Сезон)",
-        1363767693L to "Jenny (Дженни — Скрытый)",
-        135046766L to "Monique (Моник — Скрытый)",
-        -496667767L to "Rey Romeo (Рэй Ромео — Хэллоуин)"
+    val classicCharacters: List<CharacterCatalogEntry> = listOf(
+        CharacterCatalogEntry("jake", "Jake", listOf("default", "darkOutfit", "starOutfit"), "Core Crew"),
+        CharacterCatalogEntry("tricky", "Tricky", listOf("default", "heartOutfit", "camoOutfit"), "Core Crew"),
+        CharacterCatalogEntry("fresh", "Fresh", listOf("default", "funkOutfit", "sportOutfit"), "Core Crew"),
+        CharacterCatalogEntry("spike", "Spike", listOf("default", "rockOutfit", "punkOutfit"), "Core Crew"),
+        CharacterCatalogEntry("yutani", "Yutani", listOf("default", "gadgetOutfit"), "Core Crew"),
+        CharacterCatalogEntry("countCorvin", "Count Corvin", listOf("default"), "Season S125"),
+        CharacterCatalogEntry("xoloko", "Xoloko", listOf("default"), "Season S125"),
+        CharacterCatalogEntry("whiteRabbit", "White Rabbit", listOf("default", "nightshadeOutfit"), "Season S125"),
+        CharacterCatalogEntry("seanSnow", "Sean Snow", listOf("default", "frankenstyleOutfit"), "Season S125"),
+        CharacterCatalogEntry("danUnder", "Dan Under", listOf("default"), "Season S125"),
+        CharacterCatalogEntry("almaBrava", "Alma Brava", listOf("default"), "Season S125"),
+        CharacterCatalogEntry("pumpkinpete", "Pumpkin Pete", listOf("default"), "Halloween"),
+        CharacterCatalogEntry("santiGrafito", "Santi Grafito", listOf("default"), "Season S124"),
+        CharacterCatalogEntry("matilda", "Matilda", listOf("default", "comicCoreOutfit"), "Season S124"),
+        CharacterCatalogEntry("orionStarborn", "Orion Starborn", listOf("default"), "Season S123"),
+        CharacterCatalogEntry("alpha", "Alpha", listOf("default", "omegaOutfit"), "Special"),
+        CharacterCatalogEntry("bbno$", "bbno$", listOf("default"), "Collab VIP"),
+        CharacterCatalogEntry("demi", "Demi Lovato", listOf("default"), "Collab VIP"),
+        CharacterCatalogEntry("theBurgerKing", "The Burger King", listOf("default"), "Collab VIP"),
+        CharacterCatalogEntry("outatimeJake", "Outatime Jake (BTTF)", listOf("default"), "Collab VIP"),
+        CharacterCatalogEntry("amongUsRed", "Crewmate Jake (Red)", listOf("default"), "Among Us"),
+        CharacterCatalogEntry("amongUsYellow", "Crewmate Tricky (Yellow)", listOf("default"), "Among Us"),
+        CharacterCatalogEntry("amongUsBlack", "Crewmate Spike (Black)", listOf("default"), "Among Us"),
+        CharacterCatalogEntry("amongUsCyan", "Crewmate King (Cyan)", listOf("default"), "Among Us"),
+        CharacterCatalogEntry("amongUsRose", "Crewmate Tasha (Rose)", listOf("default"), "Among Us"),
+        CharacterCatalogEntry("amongUsGreen", "Crewmate Guard (Green)", listOf("default"), "Among Us"),
+        CharacterCatalogEntry("amongUsFrank", "Crewmate Frank", listOf("default"), "Among Us"),
+        CharacterCatalogEntry("bsPointyGuy", "Brawl Stars Spike", listOf("default"), "Brawl Stars"),
+        CharacterCatalogEntry("bsBeardedGuy", "Brawl Stars Dynamike", listOf("default"), "Brawl Stars"),
+        CharacterCatalogEntry("bsSkullGuy", "Brawl Stars Poco", listOf("default"), "Brawl Stars"),
+        CharacterCatalogEntry("bsFastGirl", "Brawl Stars Max", listOf("default"), "Brawl Stars"),
+        CharacterCatalogEntry("bsElegantGirl", "Brawl Stars Piper", listOf("default"), "Brawl Stars"),
+        CharacterCatalogEntry("bsToughGuy", "Brawl Stars El Primo", listOf("default"), "Brawl Stars"),
+        CharacterCatalogEntry("red", "Angry Birds Red", listOf("default"), "Angry Birds"),
+        CharacterCatalogEntry("chuck", "Angry Birds Chuck", listOf("default"), "Angry Birds"),
+        CharacterCatalogEntry("eightBallJake", "8 Ball Jake", listOf("default"), "Collab VIP"),
+        CharacterCatalogEntry("princeK", "Prince K", listOf("default", "jagOutfit", "shineOutfit"), "Core Crew"),
+        CharacterCatalogEntry("brody", "Brody", listOf("default", "poshOutfit", "chillOutfit"), "Core Crew"),
+        CharacterCatalogEntry("frank", "Frank", listOf("default", "clownOutfit", "tigerOutfit"), "Core Crew"),
+        CharacterCatalogEntry("ella", "Ella", listOf("default", "rastaOutfit", "goldOutfit"), "Core Crew"),
+        CharacterCatalogEntry("king", "King", listOf("default", "countOutfit", "royalOutfit"), "Core Crew"),
+        CharacterCatalogEntry("ninja", "Ninja", listOf("default", "yangOutfit", "flameOutfit"), "Core Crew"),
+        CharacterCatalogEntry("lucy", "Lucy", listOf("default", "gothOutfit", "steamOutfit"), "Core Crew"),
+        CharacterCatalogEntry("tasha", "Tasha", listOf("default", "cheeroutfit", "gymOutfit"), "Core Crew"),
+        CharacterCatalogEntry("tagbot", "Tagbot", listOf("default", "spaceOutfit", "toyOutfit"), "Core Crew"),
+        CharacterCatalogEntry("zoe", "Zoe", listOf("default", "curlyOutfit", "bikerOutfit"), "Core Crew"),
+        CharacterCatalogEntry("missMaia", "Miss Maia", listOf("default"), "Core Crew"),
+        CharacterCatalogEntry("boombot", "Boombot", listOf("default"), "Core Crew"),
+        CharacterCatalogEntry("dino", "Dino", listOf("default"), "Core Crew"),
+        CharacterCatalogEntry("zombiejake", "Zombie Jake", listOf("default", "seriousOutfit"), "Halloween"),
+        CharacterCatalogEntry("elfTricky", "Elf Tricky", listOf("default", "iceOutfit", "candyOutfit"), "Festive"),
+        CharacterCatalogEntry("tony", "Tony", listOf("default", "folkOutfit", "gameOutfit"), "World Tour"),
+        CharacterCatalogEntry("carmen", "Carmen", listOf("default", "shakeOutfit", "teamOutfit"), "World Tour"),
+        CharacterCatalogEntry("roberto", "Roberto", listOf("default", "fanOutfit", "culesOutfit"), "World Tour"),
+        CharacterCatalogEntry("kim", "Kim", listOf("default", "diveOutfit", "coastOutfit"), "World Tour"),
+        CharacterCatalogEntry("harumi", "Harumi", listOf("default", "meowOutfit", "furyOutfit"), "World Tour"),
+        CharacterCatalogEntry("nick", "Nick", listOf("default", "speedOutfit", "neonOutfit"), "World Tour"),
+        CharacterCatalogEntry("coco", "Coco", listOf("default", "artOutfit", "jesterOutfit"), "World Tour"),
+        CharacterCatalogEntry("sun", "Sun", listOf("default", "spotOutfit", "rogueOutfit"), "World Tour"),
+        CharacterCatalogEntry("alex", "Alex", listOf("default", "technoOutfit"), "World Tour"),
+        CharacterCatalogEntry("eddy", "Eddy", listOf("default", "trickOutfit", "vampireOutfit"), "Halloween"),
+        CharacterCatalogEntry("jamie", "Jamie", listOf("default", "tophatOutfit", "hatterOutfit"), "World Tour"),
+        CharacterCatalogEntry("jay", "Jay", listOf("default", "blueOutfit", "colorMasterOutfit"), "World Tour"),
+        CharacterCatalogEntry("mina", "Mina", listOf("default", "roboOutfit", "popOutfit"), "World Tour"),
+        CharacterCatalogEntry("rosa", "Rosa", listOf("default", "foxOutfit", "ceiboOutfit"), "World Tour"),
+        CharacterCatalogEntry("olivia", "Olivia", listOf("default", "skateOutfit", "derbyMacabreOutfit"), "World Tour"),
+        CharacterCatalogEntry("edison", "Edison", listOf("default", "urbanOutfit"), "World Tour"),
+        CharacterCatalogEntry("wayne", "Wayne", listOf("default", "chiefOutfit", "knightOutfit"), "World Tour"),
+        CharacterCatalogEntry("jasmine", "Jasmine", listOf("default", "safariOutfit", "ankhOutfit"), "World Tour"),
+        CharacterCatalogEntry("noon", "Noon", listOf("default", "pinkOutfit", "siamOutfit"), "World Tour"),
+        CharacterCatalogEntry("buddy", "Buddy", listOf("default", "sunnyOutfit", "candyOutfit"), "Festive"),
+        CharacterCatalogEntry("rex", "Rex", listOf("default", "showOutfit", "winOutfit"), "World Tour"),
+        CharacterCatalogEntry("izzy", "Izzy", listOf("default", "alohaOutfit", "lakiOutfit"), "World Tour"),
+        CharacterCatalogEntry("amira", "Amira", listOf("default", "genieOutfit", "jewelOutfit"), "World Tour"),
+        CharacterCatalogEntry("marco", "Marco", listOf("default", "maskOutfit", "nobleOutfit"), "World Tour"),
+        CharacterCatalogEntry("nikos", "Nikos", listOf("default", "heroOutfit", "hopperOutfit"), "World Tour"),
+        CharacterCatalogEntry("zuri", "Zuri", listOf("default", "cityOutfit"), "World Tour"),
+        CharacterCatalogEntry("mike", "Mike", listOf("default", "howlOutfit", "jagerOutfit"), "Halloween"),
+        CharacterCatalogEntry("jenny", "Jenny", listOf("default", "partyOutfit", "pixelOutfit"), "World Tour"),
+        CharacterCatalogEntry("jaro", "Jaro", listOf("default", "jokerOutfit"), "World Tour"),
+        CharacterCatalogEntry("aina", "Aina", listOf("default", "daisyOutfit", "blueOutfit"), "World Tour"),
+        CharacterCatalogEntry("carlos", "Carlos", listOf("default", "incaOutfit", "ponchoOutfit"), "World Tour"),
+        CharacterCatalogEntry("jia", "Jia", listOf("default", "wildOutfit", "unicornOutfit"), "World Tour"),
+        CharacterCatalogEntry("bjarki", "Bjarki", listOf("default", "powerOutfit", "fisherOutfit"), "World Tour"),
+        CharacterCatalogEntry("ramona", "Ramona", listOf("default", "pinaOutfit", "elegantOutfit"), "World Tour"),
+        CharacterCatalogEntry("lauren", "Lauren", listOf("default", "tallyOutfit", "pilotOutfit"), "World Tour"),
+        CharacterCatalogEntry("malik", "Malik", listOf("default", "tuskOutfit", "penguinOutfit"), "World Tour"),
+        CharacterCatalogEntry("jolien", "Jolien", listOf("default", "floristOutfit", "springOutfit"), "World Tour"),
+        CharacterCatalogEntry("philip", "Philip", listOf("default", "racerOutfit", "captainOutfit"), "World Tour"),
+        CharacterCatalogEntry("freya", "Freya", listOf("default", "vikingOutfit", "winterMagicOutfit"), "World Tour"),
+        CharacterCatalogEntry("salma", "Salma", listOf("default", "nomadOutfit", "talismanOutfit"), "World Tour"),
+        CharacterCatalogEntry("lee", "Lee", listOf("default", "silkOutfit", "wudangOutfit"), "World Tour"),
+        CharacterCatalogEntry("diego", "Diego", listOf("default", "flamencoOutfit", "chivalryoutfit"), "World Tour"),
+        CharacterCatalogEntry("manny", "Manny", listOf("default", "mariachiOutfit", "luchadorOutfit"), "Halloween"),
+        CharacterCatalogEntry("nicolai", "Nicolai", listOf("default", "frostOutfit", "fauxFurOutfit"), "Festive"),
+        CharacterCatalogEntry("ez", "E.Z.", listOf("default", "touchdownOutfit", "JiveOutfit"), "World Tour"),
+        CharacterCatalogEntry("sofia", "Sofia", listOf("default", "gauchoOutfit", "tangoOutfit"), "World Tour"),
+        CharacterCatalogEntry("dylan", "Dylan", listOf("default", "lifeguardOutfit", "walkmanOutfit"), "World Tour"),
+        CharacterCatalogEntry("nina", "Nina", listOf("default", "cyberPunkOutfit", "whitenightOutfit"), "World Tour"),
+        CharacterCatalogEntry("brandon", "Brandon", listOf("default", "kungFuOutfit"), "World Tour"),
+        CharacterCatalogEntry("scarlett", "Scarlett", listOf("default", "catrinaOutfit", "botanicalHorrorOutfit"), "Halloween"),
+        CharacterCatalogEntry("alicia", "Alicia", listOf("default", "tracksuitOutfit", "fallOutfit"), "World Tour"),
+        CharacterCatalogEntry("hugo", "Hugo", listOf("default", "mountainOutfit", "piratOutfit"), "World Tour"),
+        CharacterCatalogEntry("rabbot", "Rabbot", listOf("default", "ironbunOutfit"), "Special"),
+        CharacterCatalogEntry("rin", "Rin", listOf("default", "lunarOutfit"), "World Tour"),
+        CharacterCatalogEntry("kareem", "Kareem", listOf("default", "SilkOutfit"), "World Tour"),
+        CharacterCatalogEntry("ace", "Ace", listOf("default", "pilotOutfit"), "World Tour"),
+        CharacterCatalogEntry("mei", "Mei", listOf("default", "islanderOutfit", "bumiOutfit"), "World Tour"),
+        CharacterCatalogEntry("mimi", "Mimi", listOf("default", "folkOutfit"), "World Tour"),
+        CharacterCatalogEntry("maeko", "Maeko", listOf("default", "hostessOutfit", "streetOutfit"), "World Tour"),
+        CharacterCatalogEntry("alba", "Alba", listOf("default", "cowgirlOutfit", "spaceOutfit"), "World Tour"),
+        CharacterCatalogEntry("amy", "Amy", listOf("default", "regularOutfit"), "World Tour"),
+        CharacterCatalogEntry("festiveFresh", "Festive Fresh", listOf("default", "hoodieOutfit"), "Festive"),
+        CharacterCatalogEntry("festiveJake", "Festive Jake", listOf("default"), "Festive"),
+        CharacterCatalogEntry("festiveTricky", "Festive Tricky", listOf("default"), "Festive"),
+        CharacterCatalogEntry("festiveYutani", "Festive Yutani", listOf("default"), "Festive"),
+        CharacterCatalogEntry("festiveSpike", "Festive Spike", listOf("default"), "Festive"),
+        CharacterCatalogEntry("festiveFrank", "Festive Frank", listOf("default", "anubisOutfit", "fortuneOutfit"), "Festive"),
+        CharacterCatalogEntry("monkbot", "Monkbot", listOf("default"), "Special"),
+        CharacterCatalogEntry("ming", "Ming", listOf("default", "whitesnakeOutfit"), "World Tour"),
+        CharacterCatalogEntry("liu", "Liu", listOf("default", "birdwatcherOutfit"), "World Tour"),
+        CharacterCatalogEntry("callum", "Callum", listOf("default", "changelingOutfit", "pinkpunkOutfit"), "World Tour"),
+        CharacterCatalogEntry("jack", "Jack", listOf("default", "businessOutfit"), "World Tour"),
+        CharacterCatalogEntry("tankbot", "Tankbot", listOf("default", "incaOutfit"), "Special"),
+        CharacterCatalogEntry("cathy", "Cathy", listOf("default", "visualkeiOutfit", "seasideOutfit"), "World Tour"),
+        CharacterCatalogEntry("noel", "Noel", listOf("default", "bigblueOutfit"), "World Tour"),
+        CharacterCatalogEntry("morgan", "Morgan", listOf("default", "swampMysteryOutfit"), "Halloween"),
+        CharacterCatalogEntry("andy", "Andy", listOf("default", "gamerOutfit", "theGreatOutdoorOutfit"), "World Tour"),
+        CharacterCatalogEntry("frankette", "Frankette", listOf("default"), "Special"),
+        CharacterCatalogEntry("spacebot", "Spacebot", listOf("default"), "Special"),
+        CharacterCatalogEntry("qin", "Qin", listOf("default", "warriorOutfit"), "World Tour"),
+        CharacterCatalogEntry("hou", "Hou", listOf("default", "archerOutfit"), "World Tour"),
+        CharacterCatalogEntry("zayn", "Zayn", listOf("default", "stealthOutfit", "eastvestOutfit"), "World Tour"),
+        CharacterCatalogEntry("darryl", "Darryl", listOf("default", "gonzoOutfit"), "World Tour"),
+        CharacterCatalogEntry("lana", "Lana", listOf("default", "nordicOutfit"), "World Tour"),
+        CharacterCatalogEntry("bonnie", "Bonnie", listOf("default", "harajukuOutfit", "luckyOutfit"), "World Tour"),
+        CharacterCatalogEntry("buzz", "Buzz", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("trym", "Trym", listOf("default", "noblenewbieOutfit"), "World Tour"),
+        CharacterCatalogEntry("alexandre", "Alexandre", listOf("default", "stanOutfit"), "World Tour"),
+        CharacterCatalogEntry("parkourRin", "Parkour Rin", listOf("default"), "Special"),
+        CharacterCatalogEntry("akira", "Akira", listOf("default", "nightriderOutfit"), "World Tour"),
+        CharacterCatalogEntry("koral", "Koral", listOf("default", "tentaqueenOutfit", "subexplorerOutfit"), "World Tour"),
+        CharacterCatalogEntry("cleo", "Cleo", listOf("default", "heartbreakerOutfit", "blossomqueenOutfit"), "World Tour"),
+        CharacterCatalogEntry("taha", "Taha", listOf("default", "TropiTahaOutfit", "chilitahaOutfit"), "World Tour"),
+        CharacterCatalogEntry("bobTheBlob", "Bob The Blob", listOf("default", "slimeOutfit", "jingleOutfit"), "Special"),
+        CharacterCatalogEntry("mala", "Mala", listOf("default", "lunarOutfit", "missmosaicOutfit"), "World Tour"),
+        CharacterCatalogEntry("phoenix", "Phoenix", listOf("default", "partyBusinessOutfit", "summerOutfit"), "World Tour"),
+        CharacterCatalogEntry("clementine", "Clementine", listOf("default", "frostyOutfit", "hideandsheepOutfit"), "Festive"),
+        CharacterCatalogEntry("gingerbot", "Gingerbot", listOf("default", "wrapperOutfit"), "Festive"),
+        CharacterCatalogEntry("hasina", "Hasina", listOf("default", "worldCupOutfit", "holidayOutfit"), "World Tour"),
+        CharacterCatalogEntry("charlie", "Charlie", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("pink", "Pink", listOf("default", "spellcasterOutfit", "witchcapOutfit"), "Halloween"),
+        CharacterCatalogEntry("george", "George", listOf("default", "moonbunOutfit", "eggstravaganzaOutfit"), "World Tour"),
+        CharacterCatalogEntry("dummy", "Dummy", listOf("default", "skellyOutfit"), "Special"),
+        CharacterCatalogEntry("superRunnerJake", "Super Runner Jake", listOf("default"), "Super Runner"),
+        CharacterCatalogEntry("superRunnerTricky", "Super Runner Tricky", listOf("default"), "Super Runner"),
+        CharacterCatalogEntry("superRunnerFresh", "Super Runner Fresh", listOf("default"), "Super Runner"),
+        CharacterCatalogEntry("superRunnerYutani", "Super Runner Yutani", listOf("default"), "Super Runner"),
+        CharacterCatalogEntry("moira", "Moira", listOf("default", "thetouristOutfit", "theholiOutfit"), "World Tour"),
+        CharacterCatalogEntry("zihao", "Zihao", listOf("default", "vanillastrawberryOutfit"), "World Tour"),
+        CharacterCatalogEntry("alia", "Alia", listOf("default", "sneakyblindersOutfit"), "World Tour"),
+        CharacterCatalogEntry("fantasma", "Fantasma", listOf("default"), "Halloween"),
+        CharacterCatalogEntry("songYi", "Song Yi", listOf("default", "goldencrushOutfit", "luckyKoiOutfit"), "World Tour"),
+        CharacterCatalogEntry("fernando", "Fernando", listOf("default", "superscoutOutfit"), "World Tour"),
+        CharacterCatalogEntry("soul", "Soul", listOf("default", "centurionOutfit"), "World Tour"),
+        CharacterCatalogEntry("tutti", "Tutti", listOf("default"), "Special"),
+        CharacterCatalogEntry("frutti", "Frutti", listOf("default"), "Special"),
+        CharacterCatalogEntry("spraybot", "Spraybot", listOf("default"), "Special"),
+        CharacterCatalogEntry("catrine", "Catrine", listOf("default", "trailmixOutfit"), "World Tour"),
+        CharacterCatalogEntry("rain", "Rain", listOf("default", "gardenOutfit"), "World Tour"),
+        CharacterCatalogEntry("alfie", "Alfie", listOf("default", "cupidOutfit", "backyardtrollOutfit"), "World Tour"),
+        CharacterCatalogEntry("bruno", "Bruno", listOf("default", "pixelProOutfit"), "World Tour"),
+        CharacterCatalogEntry("taina", "Taina", listOf("default", "judokaOutfit"), "World Tour"),
+        CharacterCatalogEntry("yuto", "Yuto", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("hali", "Hali", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("thursday", "Thursday", listOf("default", "lilImpOutfit", "jeudiOutfit"), "Halloween"),
+        CharacterCatalogEntry("jiYeong", "Ji-Yeong", listOf("default", "celestialOutfit"), "World Tour"),
+        CharacterCatalogEntry("vivienne", "Vivienne", listOf("default", "hollywoodglamOutfit"), "World Tour"),
+        CharacterCatalogEntry("lawrence", "Lawrence", listOf("default", "snowballerOutfit"), "World Tour"),
+        CharacterCatalogEntry("clockworkJohnny", "Clockwork Johnny", listOf("default"), "Special"),
+        CharacterCatalogEntry("captainFlash", "Captain Flash", listOf("default"), "Special"),
+        CharacterCatalogEntry("skye", "Skye", listOf("default", "skyAttackOutfit"), "World Tour"),
+        CharacterCatalogEntry("thunder", "Thunder", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("azura", "Azura", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("dragonyear", "Dragon", listOf("default"), "Lunar"),
+        CharacterCatalogEntry("astra", "Astra", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("stella", "Stella", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("lucky", "Lucky", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("meggan", "Meggan", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("redpanda", "Red Panda", listOf("default"), "Special"),
+        CharacterCatalogEntry("hamza", "Hamza", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("faiza", "Faiza", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("teabot", "Teabot", listOf("default"), "Special"),
+        CharacterCatalogEntry("finn", "Finn", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("electra", "Electra", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("hammybee", "Hammy Bee", listOf("default"), "Special"),
+        CharacterCatalogEntry("pixeljake", "Pixel Jake", listOf("default"), "Special"),
+        CharacterCatalogEntry("ballerinatricky", "Ballerina Tricky", listOf("default"), "Special"),
+        CharacterCatalogEntry("guardking", "Guard King", listOf("default"), "Special"),
+        CharacterCatalogEntry("riley", "Riley", listOf("default", "aquamarineOutfit"), "World Tour"),
+        CharacterCatalogEntry("lily", "Lily", listOf("default", "kangarumiOutfit"), "World Tour"),
+        CharacterCatalogEntry("rudyrascal", "Rudy Rascal", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("ventura", "Ventura", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("glorgalax", "Glorgalax", listOf("default", "galaxyEmpurrorOutfit"), "Special"),
+        CharacterCatalogEntry("helene", "Helene", listOf("default", "ogrepowerOutfit"), "World Tour"),
+        CharacterCatalogEntry("leo", "Leo", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("ozzy", "Ozzy", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("pins", "Pins", listOf("default"), "Halloween"),
+        CharacterCatalogEntry("audrey", "Audrey", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("billybean", "Billy Bean", listOf("default"), "Special"),
+        CharacterCatalogEntry("ruhi", "Ruhi", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("kedi", "Kedi", listOf("default"), "Special"),
+        CharacterCatalogEntry("drflyman", "Dr. Flyman", listOf("default"), "Halloween"),
+        CharacterCatalogEntry("logan", "Logan", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("ginger", "Ginger", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("leif", "Leif", listOf("default", "fireBirdOutfit"), "World Tour"),
+        CharacterCatalogEntry("sindri", "Sindri", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("snowy", "Snowy", listOf("default"), "Festive"),
+        CharacterCatalogEntry("grandjuke", "Grand Juke", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("snake", "Snake", listOf("default"), "Lunar"),
+        CharacterCatalogEntry("tangyuan", "Tangyuan", listOf("default"), "Lunar"),
+        CharacterCatalogEntry("valentina", "Valentina", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("kaleo", "Kaleo", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("rebecaroar", "Rebeca Roar", listOf("default", "purrfectionOutfit"), "World Tour"),
+        CharacterCatalogEntry("gabriel", "Gabriel", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("dinorange", "Dinorange", listOf("default"), "Special"),
+        CharacterCatalogEntry("rocky", "Rocky", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("rani", "Rani", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("chickenjake", "Chicken Jake", listOf("default"), "Special"),
+        CharacterCatalogEntry("mallardtricky", "Mallard Tricky", listOf("default"), "Special"),
+        CharacterCatalogEntry("finlay", "Finlay", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("ribbon", "Ribbon", listOf("default"), "Special"),
+        CharacterCatalogEntry("oniHime", "Oni Hime", listOf("default", "chillBillOutfit"), "World Tour"),
+        CharacterCatalogEntry("saru", "Saru", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("loc", "Loc", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("stevie", "Stevie", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("berta", "Berta", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("costa", "Costa", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("rochelleRebelle", "Rochelle Rebelle", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("asher", "Asher", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("peter", "Peter", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("tara", "Tara", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("henry", "Henry", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("sunny", "Sunny", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("mateo", "Mateo", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("jooWon", "Joo-Won", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("siWoo", "Si-Woo", listOf("default", "springtimeOutfit"), "World Tour"),
+        CharacterCatalogEntry("mrGobbles", "Mr. Gobbles", listOf("default"), "Festive"),
+        CharacterCatalogEntry("rosie", "Rosie", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("ballerinaLatticina", "Ballerina Latticina", listOf("default"), "Special"),
+        CharacterCatalogEntry("frankNoir", "Frank Noir", listOf("default"), "Special"),
+        CharacterCatalogEntry("holly", "Holly", listOf("default", "blobbusterOutfit"), "World Tour"),
+        CharacterCatalogEntry("mia", "Mia", listOf("default", "alpineAmourOutfit"), "World Tour"),
+        CharacterCatalogEntry("rosalita", "Rosalita", listOf("default"), "Special"),
+        CharacterCatalogEntry("lorcan", "Lorcan", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("horse", "Horse", listOf("default"), "Lunar"),
+        CharacterCatalogEntry("vittorio", "Vittorio", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("enzo", "Enzo", listOf("default", "gladiatorOutfit"), "World Tour"),
+        CharacterCatalogEntry("sprinkle", "Sprinkle", listOf("default"), "Special"),
+        CharacterCatalogEntry("bunnyBetty", "Bunny Betty", listOf("default", "redBunnyOutfit"), "Special"),
+        CharacterCatalogEntry("tsukiChan", "Tsuki-Chan", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("kaito", "Kaito", listOf("default", "hayaKitsuneOutfit"), "World Tour"),
+        CharacterCatalogEntry("toaxx", "Toaxx", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("ratak", "Ratak", listOf("default", "radioRativeOutfit"), "World Tour"),
+        CharacterCatalogEntry("goldenGuardian", "Golden Guardian", listOf("default"), "Special"),
+        CharacterCatalogEntry("lestari", "Lestari", listOf("default", "hotSpotOutfit"), "World Tour"),
+        CharacterCatalogEntry("sandy", "Sandy", listOf("default", "sinkOrSwimOutfit"), "World Tour"),
+        CharacterCatalogEntry("redino", "Redino", listOf("default"), "Special"),
+        CharacterCatalogEntry("marieMacaron", "Marie Macaron", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("pierre", "Pierre", listOf("default", "bonVoyageOutfit"), "World Tour"),
+        CharacterCatalogEntry("runaDarko", "Runa Darko", listOf("default"), "World Tour"),
+        CharacterCatalogEntry("wolf", "Wolf", listOf("default", "heroOfRainOutfit"), "World Tour")
     )
 
-    val BOARDS = listOf(
-        857306595L to "Default Board (Стандартная)",
-        821107692L to "Jake Board",
-        797961277L to "Tricky Board",
-        -2027086747L to "Fresh Board",
-        -1569537423L to "Miss Maia Board",
-        -573684740L to "NinjaOne Board",
-        -2089484430L to "Yutani Board",
-        -875752536L to "Spike Board",
-        -1886993925L to "Ella Board",
-        -425685755L to "Nicky Board",
-        463203314L to "Noon Board",
-        -1101319815L to "Billy Board",
-        -1995581156L to "Rosalita Board",
-        -487324792L to "Tasha Board",
-        -1946062440L to "Jaewoo Board",
-        -2014824727L to "Tagbot Board",
-        369661746L to "Lucy Board (Скрытая)",
-        1389875337L to "Georgie Board (Скрытая)",
-        -268124908L to "V3ctor Board (Скрытая)",
-        -762458939L to "Zara Board (Скрытая)",
-        -1702093280L to "Lilah Board (Скрытая)",
-        -1398156391L to "Ash Board (Скрытая)",
-        1016074756L to "Jenny Board (Скрытая)",
-        1346993456L to "Wei Board (Скрытая)",
-        -2028224723L to "Prince K Board (Скрытая)",
-        -282672473L to "Monique Board (Скрытая)",
-        1092080220L to "Harini Board (Скрытая)",
-        -1017845163L to "Classic Board (Google Play Эксклюзив)",
-        1711310740L to "Rey Romeo Board (Хэллоуин)"
+    val classicBoards: List<BoardCatalogEntry> = listOf(
+        BoardCatalogEntry("default", "Hoverboard", listOf("default")),
+        BoardCatalogEntry("batLuck", "Bat Luck (S125)", listOf("superJump", "highSpeed")),
+        BoardCatalogEntry("broom", "Broom (S125)", listOf("doubleJump")),
+        BoardCatalogEntry("noxDrift", "Nox Drift (S125)"),
+        BoardCatalogEntry("plankenstein", "Plankenstein (S124)", listOf("superJump", "glider")),
+        BoardCatalogEntry("digiDash", "Digi-Dash (S124)"),
+        BoardCatalogEntry("sketchySkater", "Sketchy Skater (S124)", listOf("highSpeed")),
+        BoardCatalogEntry("monster", "Monster", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("skullFire", "Skull Fire", listOf("doubleJump", "highSpeed")),
+        BoardCatalogEntry("bouncer", "Bouncer"),
+        BoardCatalogEntry("teleporter", "Teleporter"),
+        BoardCatalogEntry("greatWhite", "Great White", listOf("speed", "glider")),
+        BoardCatalogEntry("sunset", "Sunset", listOf("trail", "glider")),
+        BoardCatalogEntry("starboard", "Starboard", listOf("trail", "doubleJump")),
+        BoardCatalogEntry("superhero", "Superhero", listOf("teleport", "jumper")),
+        BoardCatalogEntry("freestyler", "Freestyler", listOf("doubleJump", "jumper")),
+        BoardCatalogEntry("bigKahuna", "Big Kahuna", listOf("glider", "lowrider")),
+        BoardCatalogEntry("lumberjack", "Lumberjack", listOf("doubleJump", "lowrider")),
+        BoardCatalogEntry("scoot", "Scoot", listOf("teleport", "highSpeed")),
+        BoardCatalogEntry("chicky", "Chicky", listOf("trail", "highSpeed")),
+        BoardCatalogEntry("jingles", "Jingles", listOf("trail", "superJump")),
+        BoardCatalogEntry("bassBlaster", "Bass Blaster", listOf("trail", "jumper")),
+        BoardCatalogEntry("colorCloud", "Color Cloud", listOf("highSpeed", "teleport")),
+        BoardCatalogEntry("magicCarpet", "Magic Carpet", listOf("glider", "jumper")),
+        BoardCatalogEntry("rocket", "Rocket", listOf("trail", "highSpeed")),
+        BoardCatalogEntry("4thOfJuly", "4th Of July", listOf("trail", "highSpeed")),
+        BoardCatalogEntry("stallion", "Stallion", listOf("trail", "jumper")),
+        BoardCatalogEntry("jazz", "Jazz", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("aero", "Aero", listOf("highSpeed", "glider")),
+        BoardCatalogEntry("scarab", "Scarab", listOf("glider", "highSpeed")),
+        BoardCatalogEntry("mapleLeaf", "Maple Leaf", listOf("glider", "superJump")),
+        BoardCatalogEntry("smokingSlime", "Smoking Slime", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("dangerdasher", "Danger Dasher", listOf("lowrider", "doubleJump")),
+        BoardCatalogEntry("futureWave", "Future Wave", listOf("highSpeed", "doubleJump")),
+        BoardCatalogEntry("raveRider", "Rave Rider", listOf("doubleJump", "glider")),
+        BoardCatalogEntry("flamingdoll", "Flaming Doll", listOf("lowrider", "superJump")),
+        BoardCatalogEntry("backtothefuture", "Back to the Future"),
+        BoardCatalogEntry("energy", "Energy", listOf("teleport", "superJump")),
+        BoardCatalogEntry("sharpeed", "Sharpeed", listOf("superJump", "highSpeed")),
+        BoardCatalogEntry("electroshock", "Electro Shock", listOf("doubleJump", "glider")),
+        BoardCatalogEntry("skyrocket", "Sky Rocket", listOf("highSpeed", "doubleJump")),
+        BoardCatalogEntry("roaringheart", "Roaring Heart", listOf("highSpeed", "doubleJump")),
+        BoardCatalogEntry("interstellar", "Interstellar", listOf("glider", "lowrider")),
+        BoardCatalogEntry("astrotune", "Astro Tune", listOf("doubleJump", "highSpeed")),
+        BoardCatalogEntry("meggabite", "Megga Bite", listOf("highSpeed", "lowrider")),
+        BoardCatalogEntry("jak", "Jak", listOf("glider", "highSpeed")),
+        BoardCatalogEntry("teatimer", "Tea Timer", listOf("highSpeed", "glider")),
+        BoardCatalogEntry("yellowsub", "Yellow Sub", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("mayomania", "Mayo Mania", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("alarmon", "Alarm On", listOf("highSpeed", "glider")),
+        BoardCatalogEntry("sunnysailor", "Sunny Sailor", listOf("superJump", "glider")),
+        BoardCatalogEntry("riskyride", "Risky Ride", listOf("highSpeed", "lowrider")),
+        BoardCatalogEntry("heavymetal", "Heavy Metal", listOf("highSpeed", "lowrider")),
+        BoardCatalogEntry("champ", "Champ", listOf("doubleJump", "glider")),
+        BoardCatalogEntry("raggedyrunner", "Raggedy Runner", listOf("superJump", "glider")),
+        BoardCatalogEntry("brasswhizz", "Brass Whizz", listOf("doubleJump", "glider")),
+        BoardCatalogEntry("cookexpress", "Cook-Express", listOf("doubleJump", "glider")),
+        BoardCatalogEntry("veggievelocity", "Veggie Velocity", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("couchSurfer", "Couch Surfer", listOf("glider", "doubleJump")),
+        BoardCatalogEntry("feartractor", "Fear Tractor", listOf("doubleJump", "glider")),
+        BoardCatalogEntry("scifly", "Sci-Fly", listOf("superJump", "glider")),
+        BoardCatalogEntry("foxtrail", "Fox Trail", listOf("superJump", "glider")),
+        BoardCatalogEntry("cozycruiser", "Cozy Cruiser", listOf("highSpeed", "lowrider")),
+        BoardCatalogEntry("jingledingle", "Jingle Dingle", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("lantern", "Lantern", listOf("doubleJump", "glider")),
+        BoardCatalogEntry("heartstopper", "Heartstopper", listOf("highSpeed", "glider")),
+        BoardCatalogEntry("roarsome", "Roarsome", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("purplespin", "Purple Spin", listOf("superJump", "lowrider")),
+        BoardCatalogEntry("bloomster", "Bloomster", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("guardboard", "Guard Board", listOf("glider", "highSpeed")),
+        BoardCatalogEntry("trespasser", "Trespasser", listOf("superJump", "glider")),
+        BoardCatalogEntry("youarehere", "You Are Here", listOf("doubleJump", "highSpeed")),
+        BoardCatalogEntry("floatBooster", "Float Booster", listOf("highSpeed", "glider")),
+        BoardCatalogEntry("streetStyle", "Street Style", listOf("lowrider", "superJump")),
+        BoardCatalogEntry("businessTime", "Business Time", listOf("lowrider", "highSpeed")),
+        BoardCatalogEntry("brainstormer", "Brainstormer", listOf("superJump", "glider")),
+        BoardCatalogEntry("theDelyreious", "The De-Lyre-ious", listOf("superJump", "highSpeed")),
+        BoardCatalogEntry("motorMania", "Motor Mania", listOf("doubleJump", "lowrider")),
+        BoardCatalogEntry("fiesta", "Fiesta", listOf("highSpeed", "glider")),
+        BoardCatalogEntry("biasBoom", "Bias Boom", listOf("superJump", "highSpeed")),
+        BoardCatalogEntry("gobbleTrouble", "Gobble Trouble", listOf("glider", "highSpeed")),
+        BoardCatalogEntry("meanGreenMachine", "Mean Green Machine", listOf("superJump", "glider")),
+        BoardCatalogEntry("frankmobile", "Frankmobile", listOf("superJump", "glider")),
+        BoardCatalogEntry("fireStarter", "Fire Starter", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("theGreenFlame", "The Green Flame", listOf("glider", "doubleJump")),
+        BoardCatalogEntry("marbleous", "Marbleous", listOf("highSpeed", "doubleJump")),
+        BoardCatalogEntry("pixelPerfect", "Pixel Perfect", listOf("doubleJump", "glider")),
+        BoardCatalogEntry("fastFurward", "Fast Furward", listOf("superJump", "highSpeed")),
+        BoardCatalogEntry("sewerSurfer", "Sewer Surfer", listOf("glider", "superJump")),
+        BoardCatalogEntry("14thBirthday", "14th Birthday"),
+        BoardCatalogEntry("bombBastic", "Bomb-Bastic"),
+        BoardCatalogEntry("templeRush", "Temple Rush", listOf("doubleJump", "lowrider")),
+        BoardCatalogEntry("offRoadRanger", "Off-Road Ranger", listOf("highSpeed", "superJump")),
+        BoardCatalogEntry("sweetElite", "Sweet Elite", listOf("highSpeed", "glider")),
+        BoardCatalogEntry("vulkarion", "Vulkarion", listOf("glider", "highSpeed")),
+        BoardCatalogEntry("astroBelt", "Astro-Belt", listOf("highSpeed", "lowrider")),
+        BoardCatalogEntry("eightBall", "8 Ball"),
+        BoardCatalogEntry("hexed", "Hexed"),
+        BoardCatalogEntry("pumpkin", "Pumpkin"),
+        BoardCatalogEntry("shinSupreme", "Shin Supreme", listOf("doubleJump")),
+        BoardCatalogEntry("goat", "Goat")
     )
 
-    val ALL_SKINS = longArrayOf(
-        -56800546, -960954917, 213457242, -848432295, -1186298654, -1882385935,
-        2075106495, -1087452012, -421137594, -72574065, 1564209559, -1650480580,
-        1013312398, 8504888, -820187263, -1583432582, 1202249944, -880195487,
-        -1292355720, 772685907, 1310049346, -1083767387, 1154305282, 775756685,
-        910350527, 577316046, 1189151463, -672918755, 2065748087, -1253901889,
-        460586275, -258476380, 1109772367, 1478947346, 922134811, -759788578,
-        -1655542994, 2075049185, -989991611, 1508371367, -93943772, 1990369193,
-        -2145465549, -152602730, -1566346654, 27667358, -1959135014, 2025202852,
-        -1067636066, -1389912410, 389528075, -1487295210, -503301639, -1312184589,
-        288125499, -889435486, -1312276630, -1360992679, -1505271108, 374299079,
-        -1236251198, 1864637985, -209858400, -789829533, -1597270950, 1093072756,
-        334108993, 1870421642, -2098605721, 2030621953, 816980720, 1150862217,
-        272931189, -325915144, -1795574191, 362958220, -1287581543, -2092832313,
-        -871825427, 550381294, 1356103770, -1112152883, 1781172277, -1354700793,
-        1228420716, 492640795, -1415696609, 1335121268, 1962475607, 748483822,
-        -651312328, 666084587, -2129570054, -1857764588, 1014902922, 2085271833,
-        -1648267179, 1136726127, 1119532892, 726823100, 1076495376, 1973379545,
-        -122811436, -1212267509, 773419542, -1447454858, -1143369791, 1093744178,
-        -1590860557, 366723518, -634862949, 562706612, 1013987027, 1171279005,
-        2016861369, 1208727121, 1176109949, 595861865, -284965872, 1384745101,
-        -19413135, -1754777190, 1313220645, -1041693778
+    // =========================================================================
+    // 2. БАЗА ДАННЫХ SUBWAY SURFERS CITY (ПЕРСОНАЖИ, ТРИАЛЫ, КОПИЛКА, РАЙОНЫ)
+    // =========================================================================
+
+    val cityCharacters: List<CharacterCatalogEntry> = listOf(
+        CharacterCatalogEntry("jake", "Jake (City)", listOf("default", "street", "neon"), "Core"),
+        CharacterCatalogEntry("tricky", "Tricky (City)", listOf("default", "beat", "cyber"), "Core"),
+        CharacterCatalogEntry("fresh", "Fresh (City)", listOf("default", "boom", "gold"), "Core"),
+        CharacterCatalogEntry("yutani", "Yutani (City)", listOf("default", "alien", "tech"), "Core"),
+        CharacterCatalogEntry("spike", "Spike (City)", listOf("default", "punk", "chrome"), "Core"),
+        CharacterCatalogEntry("brizzy", "Brizzy", listOf("default", "roller"), "City Exclusive"),
+        CharacterCatalogEntry("celeste", "Celeste", listOf("default", "starlight"), "City Exclusive"),
+        CharacterCatalogEntry("zane", "Zane", listOf("default", "shadow"), "City Exclusive"),
+        CharacterCatalogEntry("clara", "Clara", listOf("default", "floral"), "City Exclusive"),
+        CharacterCatalogEntry("dex", "Dex", listOf("default", "arcade"), "City Exclusive"),
+        CharacterCatalogEntry("billy", "Billy", listOf("default", "hazard"), "City Exclusive"),
+        CharacterCatalogEntry("nova", "Nova", listOf("default", "plasma"), "City Exclusive"),
+        CharacterCatalogEntry("roxy", "Roxy", listOf("default", "glam"), "City Exclusive"),
+        CharacterCatalogEntry("kilo", "Kilo", listOf("default", "heavy"), "City Exclusive"),
+        CharacterCatalogEntry("veda", "Veda", listOf("default", "mystic"), "City Exclusive")
     )
 
-    val ALL_AVATARS = longArrayOf(
-        -2018974533, 1865504338, -437323474, -782241132, -1613049225, 2087481287,
-        -26258735, -1641504761, 8505649, -441356086, -400793105, -2116945982,
-        788191187, 1383998524, 421680248, -817891651, 536715003, -460774707,
-        685395160, -1115378706, -893091252, 1125679113, -819973436, 1888966466,
-        -1517921881, 1698168951, 1835072283, -74699014, -1414833067, 1304218915,
-        -64934795, 1255266723, 649252816, 1342239482, 942561756, -1390847315,
-        -1686024645, -1027977298, 1483759143, 1618580706, -224214846
+    val cityTrialsIds = listOf(
+        "trial_daily_rush",
+        "trial_character_showcase",
+        "trial_board_mastery",
+        "trial_coin_blitz",
+        "trial_survival_sprint",
+        "trial_mystery_obstruction",
+        "trial_high_voltage",
+        "trial_weekend_grand_prix",
+        "trial_district_tour",
+        "trial_boss_chase"
     )
 
-    val SEASONS = listOf(
-        "617fdd91-5a36-4357-82b3-ecf0dee2bc3f" to "Season Rey (Октябрь 2026 — Хэллоуин)",
-        "66d75995-8016-48e0-bd7c-45260312cc6f" to "Season Ash (Сентябрь 2026)",
-        "e612925f-d902-46fa-b0c3-fe24d6cb2132" to "Season Prince K (Август 2026)",
-        "8a96f48b-af00-4fcf-8ddd-1347db375ac4" to "Season Zara (Июль 2026)",
-        "6d8dfab9-cc5b-4f0b-aefb-bfd3a0e495c9" to "Season Wei (Июнь 2026)",
-        "342d0c89-035d-4d94-9cd2-1d1a6e9b5ca9" to "Season Harini (Май 2026)",
-        "0c284682-d509-49ed-9a12-e555bb9efdff" to "Season Georgie (Апрель 2026)",
-        "c7f55cc9-e455-4301-9340-559ecc94c124" to "Season V3ctor (Март 2026)",
-        "781915fe-041b-4e26-be8c-6eb5c7be547e" to "Season Lucy (Февраль 2026)"
+    val cityDistrictIds = listOf(
+        "district_the_docks",
+        "district_southline",
+        "district_sunrise_blvd",
+        "district_delorean_park",
+        "district_neon_heights",
+        "district_industrial_bay",
+        "district_cyber_plaza"
     )
 
-    val DISTRICTS = longArrayOf(
-        754815718L, -48406815L, 1011666857L, -846857L, -530046136L, 958198924L
-    )
+    // =========================================================================
+    // 3. ПАТЧЕРЫ ДЛЯ SUBWAY SURFERS CITY (GAME.SAV)
+    // =========================================================================
 
-    val PIGGY_BANKS = listOf(
-        "shop.piggybankmlp7.3" to (-2000200805L to "Ур. 7.3 MAX (50k / 250k Upsell, 5x)"),
-        "shop.piggybankmlp6.3" to (-1933733375L to "Ур. 6.3 (50k / 250k Upsell, 5x)"),
-        "shop.piggybankmlp5.3" to (124549527L to "Ур. 5.3 (50k / 250k Upsell, 5x)"),
-        "shop.piggybankmlp4.3" to (-1743352494L to "Ур. 4.3 (50k / 100k Upsell, 5x)"),
-        "shop.piggybankmlp3.3" to (915248653L to "Ур. 3.3 (30k / 100k Upsell, 3x)"),
-        "shop.piggybankmlp2.3" to (1133997251L to "Ур. 2.3 (30k / 100k Upsell, 3x)"),
-        "shop.piggybankmlp1.3" to (-1010454968L to "Ур. 1.3 (30k / 50k Upsell, 3x)"),
-        "shop.piggybankmlp0.3" to (1403785926L to "Ур. 0.3 Базовая (30k, 3x)"),
-        "shop.piggybankmlp0.2" to (-1907218307L to "Ур. 0.2 Базовая (30k, 3x)"),
-        "shop.piggybankmlp0.1" to (1981335447L to "Ур. 0.1 Стартовая (30k, 3x)")
-    )
+    /**
+     * Открывает ВСЕ Триалы (Ивентовые забеги) в Subway Surfers City,
+     * сбрасывает кулдауны, даёт бесконечные билеты входа и открывает все награды.
+     */
+    fun patchCityUnlockAllTrials(gameJson: String): String {
+        val root = JSONObject(gameJson)
+        val nowSec = Instant.now().epochSecond
 
-    val SCHEDULED_CAMPAIGNS = listOf(
-        "weekly1" to "⚡ Speedy Stages 1 (Ускорители — Бруклин/Гавань)",
-        "weekly2" to "⚡ Speedy Stages 2 (Ускорители — Коммерческий)",
-        "weekly-campaign-rails-grinding-1" to "🛤️ Rails Grinding 1 (Езда по рельсам 1)",
-        "weekly-campaign-rails-grinding-2" to "🛤️ Rails Grinding 2 (Езда по рельсам 2)",
-        "weekly-campaign-slow-motion-1" to "⏱️ Slow Down 1 (Замедление времени)",
-        "weekly-campaign-halloween-pumpkin-1" to "🎃 Halloween Pumpkin Неделя 1",
-        "weekly-campaign-halloween-pumpkin-2" to "🎃 Halloween Pumpkin Неделя 2",
-        "weekly-campaign-halloween-pumpkin-3" to "🎃 Halloween Pumpkin Неделя 3",
-        "weekly-campaign-halloween-pumpkin-4" to "🎃 Halloween Pumpkin Неделя 4"
-    )
+        // 1. Разблокируем фичу триалов и билеты
+        val currencies = root.optJSONObject("currencies") ?: JSONObject().also { root.put("currencies", it) }
+        currencies.put("TrialTickets", 9999)
+        currencies.put("EventTickets", 9999)
+        currencies.put("Tickets", 9999)
 
-    val QUESTS = listOf(
-        "jimothy-racoon" to (965321873L to "🦝 Jimothy Racoon (Енот Джимоти)"),
-        "tour-de-france" to (-1372795066L to "🚴 Tour de France (Велогонка)"),
-        "gamer-week" to (-1232142887L to "🎮 Google Gamer Week (Неделя геймеров)"),
-        "india-independence-harini" to (1192805612L to "🇮🇳 Harini Independence (День Индии)"),
-        "fullmoon-2026" to (656300265L to "🌕 Full Moon Festival 2026 (Полнолуние)"),
-        "city-skating-halloween" to (-857294965L to "🎃 City Skating Halloween 2026"),
-        "mega-coin-hunt-halloween" to (-1032804383L to "🎃 Mega Coin Hunt Halloween 2026"),
-        "street-market-halloween" to (2137084127L to "🎃 Street Market Halloween 2026"),
-        "manic-monday" to (-214026141L to "📅 Manic Monday (Понедельник)"),
-        "wacky-wednesday" to (2095401401L to "📅 Wacky Wednesday (Среда)"),
-        "funky-friday" to (1435071493L to "🕺 Funky Friday (Пятница)"),
-        "city-skating" to (1554727828L to "🛹 City Skating (Скейтинг)"),
-        "mega-coin-hunt" to (-105144031L to "🪙 Mega Coin Hunt (Охота за монетами)"),
-        "street-market" to (-256745548L to "🛍️ Street Market (Уличный рынок)"),
-        "theme-park-days" to (-546746722L to "🎡 Theme Park Days (Парк аттракционов)"),
-        "soda-time" to (-1571357937L to "🥤 Soda Time (Время газировки)")
-    )
+        // 2. Патчим существующие или создаём секции trials / liveEvents / eventRuns
+        val trialKeys = listOf("trials", "trialEvents", "eventRuns", "liveEvents")
+        for (sectionKey in trialKeys) {
+            val section = root.optJSONObject(sectionKey) ?: JSONObject().also { root.put(sectionKey, it) }
+            section.put("isUnlocked", true)
+            section.put("enabled", true)
+            section.put("cooldownEndTime", 0)
+            section.put("dailyAttemptsUsed", 0)
+            section.put("maxDailyAttempts", 999)
 
-    // Полный каталог доната с понятными названиями для ручной разблокировки
-    val IAP_CATALOG = listOf(
-        "districttrial.premiumladder.001" to "🗺️ Платный пропуск трассы #1 (Бруклин — Growth Fund 1)",
-        "districttrial.premiumladder.002" to "🗺️ Платный пропуск трассы #2 (Гавань — Growth Fund 2)",
-        "districttrial.premiumladder.003" to "🗺️ Платный пропуск трассы #3 (Коммерческий — Growth Fund 3)",
-        "districttrial.premiumladder.004" to "🗺️ Платный пропуск трассы #4 (Парк — Growth Fund 4)",
-        "districttrial.premiumladder.005" to "🗺️ Платный пропуск трассы #5 (Канализация — Growth Fund 5)",
-        "districttrial.premiumladder.006" to "🗺️ Платный пропуск трассы #6 (Хэллоуин — Growth Fund 6)",
-        "sample.remove.ads" to "🚫 Полное отключение рекламы (Remove Ads)",
-        "premium_pass" to "🎟️ Премиум Сезонный Пропуск (Premium Season Pass)",
-        "shop.offer.lucy.outfitbundle.001" to "🧛‍♀️ Хэллоуинский набор Люси (Lucy Outfit Bundle)",
-        "shop.offer.subsurfclassicboardunlock001" to "🛹 Доска Classic (Google Play Эксклюзив)",
-        "shop.offer.jake_trackstar_outfit" to "👟 Костюм Jake Trackstar (Эксклюзив)",
-        "shop.offer.jake_incognito_outfit" to "🕵️ Костюм Jake Incognito (Эксклюзив)",
-        "free.offer.rosalitagooglecampaign" to "🌹 Набор Розалиты (Google Play Campaign)",
-        "home.offer.jakestarterpack" to "🎒 Стартовый набор Джейка (Меню)",
-        "shop.offer.jakestarterpack" to "🎒 Стартовый набор Джейка (Магазин)",
-        "home.offer.missmaiaintermediatepack" to "💼 Продвинутый набор Мисс Майи (Меню)",
-        "shop.offer.maiaintermediatepack" to "💼 Продвинутый набор Мисс Майи (Магазин)",
-        "home.offer.freshexpertpack" to "👑 Экспертный набор Фреша (Меню)",
-        "shop.offer.freshexpertpack" to "👑 Экспертный набор Фреша (Магазин)",
-        "shop.megabundle.mlp0.p1" to "💎 Мега-Бандл Уровень 0",
-        "shop.megabundle.mlp4.p1" to "💎 Мега-Бандл Уровень 4",
-        "shop.megabundle.mlp7.p1" to "💎 VIP Мега-Бандл Уровень 7 (Макс)",
-        "shop.megabundlehs.mlp7.p1" to "💎 VIP Мега-Бандл Рекордов Уровень 7",
-        "shop.offer.minibundle002" to "📦 Мини-набор ресурсов #2",
-        "shop.offer.combobundle001" to "🔥 Комбо-набор (Магазин)",
-        "home.offer.combobundle001" to "🔥 Комбо-набор (Меню)",
-        "shop.offer.ticketbundle001" to "🗺️ Пакет билетов кампании (Магазин)",
-        "home.offer.ticketbundle001" to "🗺️ Пакет билетов кампании (Меню)",
-        "shop.offer.revive_bundle001" to "⚡ Пакет воскрешений (Магазин)",
-        "home.offer.revive_bundle001" to "⚡ Пакет воскрешений (Меню)",
-        "shop.avatars.jakeolantern" to "🎃 Аватар: Светильник Джека",
-        "shop.avatars.scary_smiley" to "😈 Аватар: Жуткий Смайл",
-        "shop.avatars.smiling_horse" to "🐴 Аватар: Улыбающаяся Лошадь",
-        "shop.avatars.werewolf_mask" to "🐺 Аватар: Маска Оборотня",
-        "shop.avatars.calavera_skull" to "💀 Аватар: Череп Калавера",
-        "shop.avatars.candy_bat" to "🦇 Аватар: Конфетная Летучая Мышь",
-        "shop.offer.jaketokenbundle001" to "🧬 Пакет жетонов Jake #1",
-        "shop.offer.jaketokenbundle002" to "🧬 Пакет жетонов Jake #2",
-        "shop.offer.trickytokenbundle001" to "🧬 Пакет жетонов Tricky #1",
-        "shop.offer.trickytokenbundle002" to "🧬 Пакет жетонов Tricky #2",
-        "shop.offer.freshtokenbundle001" to "🧬 Пакет жетонов Fresh #1",
-        "shop.offer.freshtokenbundle002" to "🧬 Пакет жетонов Fresh #2",
-        "shop.offer.yutanitokenbundle001" to "🧬 Пакет жетонов Yutani #1",
-        "shop.offer.yutanitokenbundle002" to "🧬 Пакет жетонов Yutani #2",
-        "shop.offer.billytokenbundle001" to "🧬 Пакет жетонов Billy #1",
-        "shop.offer.billytokenbundle002" to "🧬 Пакет жетонов Billy #2",
-        "shop.offer.nickytokenbundle002" to "🧬 Пакет жетонов Nicky",
-        "shop.offer.rosalitatokenbundle002" to "🧬 Пакет жетонов Rosalita",
-        "shop.offer.missmaiatokenbundle002" to "🧬 Пакет жетонов Miss Maia",
-        "shop.offer.tagbottokenbundle002" to "🧬 Пакет жетонов Tagbot",
-        "shop.offer.spiketokenbundle002" to "🧬 Пакет жетонов Spike",
-        "shop.offer.ellatokenbundle002" to "🧬 Пакет жетонов Ella",
-        "shop.offer.tashatokenbundle002" to "🧬 Пакет жетонов Tasha",
-        "shop.offer.lilahtokenbundle002" to "🧬 Пакет жетонов Lilah",
-        "shop.offer.ninjatokenbundle002" to "🧬 Пакет жетонов NinjaOne",
-        "shop.offer.zaratokenbundle002" to "🧬 Пакет жетонов Zara",
-        "shop.offer.jaewootokenbundle002" to "🧬 Пакет жетонов Jaewoo",
-        "shop.offer.ashtokenbundle002" to "🧬 Пакет жетонов Ash",
-        "shop.offer.jennytokenbundle002" to "🧬 Пакет жетонов Jenny",
-        "shop.offer.lucytokenbundle002" to "🧬 Пакет жетонов Lucy",
-        "shop.offer.noontokenbundle002" to "🧬 Пакет жетонов Noon",
-        "shop.offer.moniquetokenbundle002" to "🧬 Пакет жетонов Monique",
-        "shop.offer.princektokenbundle002" to "🧬 Пакет жетонов Prince K"
-    )
+            val activeMap = section.optJSONObject("entries") ?: section.optJSONObject("states") ?: JSONObject().also {
+                section.put("entries", it)
+            }
 
-    val ALL_IAP_PURCHASES = IAP_CATALOG.map { it.first }
+            // Проходим по существующим триалам
+            val existingKeys = activeMap.keys().asSequence().toList()
+            val allIds = (existingKeys + cityTrialsIds).distinct()
 
-    val HOME_OFFER_NOTIFICATION_IDS = listOf(
-        "0c7a6db7-3c3b-4a6f-8f31-7c9d7c3b8d01", "1b7d5d2a-8c1a-4c6d-9f4d-0c0c4fd3e6a2",
-        "2a84b55e-7f9a-4d4b-a2b7-8f3d7b8a2d13", "4d9f1c2b-62c8-4d3e-9e2c-7a8b6c5d4e15",
-        "5e2a1b0c-2f6c-4c1d-8b7a-1c2d3e4f5a16", "6f3b2c1d-3a7d-4d2e-9c8b-2d3e4f5a6b17",
-        "7a4c3d2e-4b8e-4e3f-a9dc-3e4f5a6b7c18", "8b5d4e3f-5c9f-4f40-b0ed-4f5a6b7c8d19",
-        "9c6e5f40-6da0-4041-c1fe-5a6b7c8d9e1a", "a7d7a651-7eb1-4142-d20f-6b7c8d9e0f1b",
-        "b8e8b762-8fc2-4243-e310-7c8d9e0f1a2c", "c9f9c873-90d3-4344-f411-8d9e0f1a2b3d",
-        "d0a0d984-a1e4-4445-a512-9e0f1a2b3c4e", "e1b1ea95-b2f5-4546-b613-0f1a2b3c4d5f",
-        "f2c2fb06-c306-4647-c714-1a2b3c4d5e60", "03d30c17-d417-4748-d815-2b3c4d5e6f71",
-        "14e41d28-e528-4849-e916-3c4d5e6f7082", "25f52e39-f639-494a-f017-4d5e6f708193",
-        "36063f4a-074a-4a4b-a118-5e6f708192a4", "4717405b-185b-4b4c-b219-6f708192a3b5",
-        "5828516c-296c-4c4d-c31a-708192a3b4c6", "6939627d-3a7d-4d4e-d41b-8192a3b4c5d7",
-        "7a4a738e-4b8e-4e4f-e51c-92a3b4c5d6e8", "8b5b849f-5c9f-4f50-f61d-a3b4c5d6e7f9",
-        "9c6c95a0-6da0-4051-a71e-b4c5d6e7f801", "ad7da6b1-7eb1-4152-b81f-c5d6e7f80112",
-        "be8eb7c2-8fc2-4253-c920-d6e7f8011233", "cf9fc8d3-90d3-4354-da21-e7f801123344",
-        "d0a0d9e4-a1e4-4455-eb22-f80112334455", "e1b1eaf5-b2f5-4556-fc23-012334455667",
-        "14e41d28-e528-4859-cf26-34455667890a", "25f52e39-f639-495a-d027-455667890abc",
-        "36063f4a-074a-4a5b-e128-5667890abcde", "4717405b-185b-4b5c-f229-67890abcdef0",
-        "5828516c-296c-4c5d-a32a-7890abcdef01", "6939627d-3a7d-4d5e-b42b-890abcdef012",
-        "7a4a738e-4b8e-4e5f-c52c-90abcdef0123", "1defa511-646d-4fd0-9e6c-b375cbfaba4e",
-        "23e34fbb-13bd-49ba-85f1-a4bf8347bb97", "57a45dc2-b0ab-4889-8c7a-f7a4a18c25fa",
-        "9158f7ff-9fdf-463e-9085-5ee7f11a65b5", "e30cb274-fe98-440b-9796-e1dfbe902ac2",
-        "3ce91619-e2b2-4fb9-bb34-a9b22d49598a", "6fe0685a-727b-4c4a-ade7-b1cfac845cf1",
-        "96758b0b-b00a-4a9d-bd07-c1f5cb652c17", "7776fb3b-5a96-47b1-8c7c-4aa61592c892",
-        "1bfd27bf-41af-4de8-b498-72394330512f", "6b687778-d92f-452a-8e4a-6166b1c59301",
-        "b53e7d1b-865a-49de-8be5-e87249d47c34", "53c479c0-428d-4eff-a529-9212a15ce51c",
-        "6dc2664b-117f-42ae-b47d-646235f4c539", "9f39e522-e808-4740-9dda-ceec56e8503e",
-        "133ede8d-ba99-4e82-8d77-88665ccb5fdb", "6a4afa91-aa1f-4dfd-a188-ebf926513f34",
-        "b1bd57de-8373-4241-af3d-93b17f9d2de7", "2b694ab8-8fe1-4a3a-8f03-d4df08b0e3ec",
-        "3104d8fd-b0dd-4457-a592-cd28d7d87894"
-    )
+            for (trialId in allIds) {
+                val entry = activeMap.optJSONObject(trialId) ?: JSONObject()
+                entry.put("id", trialId)
+                entry.put("unlocked", true)
+                entry.put("isAvailable", true)
+                entry.put("state", "Unlocked")
+                entry.put("cooldown", 0)
+                entry.put("nextAvailableTime", 0)
+                entry.put("attemptsLeft", 99)
+                entry.put("currentScore", 999999)
+                entry.put("highScore", 999999)
+                entry.put("startTime", nowSec - 3600)
+                entry.put("endTime", nowSec + 86400 * 30)
 
-    val ACHIEVEMENT_MISSIONS = listOf(
-        -1048301224L to 100, 1149701091L to 2, -83190620L to 5000,
-        -1344576354L to 5, 133030444L to 100, 1739487940L to 20,
-        -818023335L to 5, 1836095912L to 5, 1347182739L to 10,
-        1724951749L to 50, -2072915534L to 200000, 41756756L to 5
-    )
+                val milestones = entry.optJSONArray("milestones") ?: JSONArray()
+                for (i in 0 until milestones.length()) {
+                    milestones.optJSONObject(i)?.apply {
+                        put("unlocked", true)
+                        put("claimed", false) // Готово к сбору в игре!
+                    }
+                }
+                activeMap.put(trialId, entry)
+            }
+        }
+        return root.toString(2)
+    }
 
-    val SECRET_STAR_TAGS = longArrayOf(
-        -533936783, -2145989581, -586907066, 879832767, -606690560, -419943634,
-        -399840750, 737186562, -504369381, -101012205, -608805007, 52993644,
-        1493141777, 477048382, -405818240, -40973798, 166990695, -1572152506,
-        2127993918, -1327161860, 471277129, -1077266123, -2051997889, -1742950628
-    )
+    /**
+     * Прокачивает Свинью-копилку (Piggy Bank) в Subway Surfers City:
+     * заполняет до максимума, поднимает уровень копилки и убирает кулдаун.
+     */
+    fun patchCityPiggyBankMax(gameJson: String, gemsAmount: Int = 50000): String {
+        val root = JSONObject(gameJson)
+        val piggyKeys = listOf("piggyBank", "piggy_bank", "savingsBank")
 
-    // Все шаги обучения (FTUE), чтобы отключить навязчивые туториалы
-    val FTUE_STEPS = listOf(
-        "first_run", "surfer_upgrade", "board_unlock", "campaign_intro",
-        "missions_intro", "season_pass_intro", "daily_trials_intro", "crew_intro",
-        "shop_intro", "piggy_bank_intro", "leaderboard_intro", "quests_intro"
-    )
+        for (key in piggyKeys) {
+            val piggy = root.optJSONObject(key) ?: JSONObject().also { root.put(key, it) }
+            piggy.put("isUnlocked", true)
+            piggy.put("enabled", true)
+            piggy.put("level", 20)
+            piggy.put("tier", 20)
+            piggy.put("currentAmount", gemsAmount)
+            piggy.put("storedGems", gemsAmount)
+            piggy.put("storedCoins", gemsAmount * 10)
+            piggy.put("capacity", gemsAmount)
+            piggy.put("maxCapacity", gemsAmount)
+            piggy.put("isFull", true)
+            piggy.put("canClaimFree", true)
+            piggy.put("cooldownEndTime", 0)
+        }
+        return root.toString(2)
+    }
+
+    /**
+     * Максимальная прокачка аккаунта Subway Surfers City (Валюта + Районы + Персонажи 15 ур. + Доски 15 ур.)
+     */
+    fun patchCityMaxEverything(gameJson: String): String {
+        var modified = patchCityUnlockAllTrials(gameJson)
+        modified = patchCityPiggyBankMax(modified, 99999)
+        val root = JSONObject(modified)
+
+        // Валюта
+        val currencies = root.optJSONObject("currencies") ?: JSONObject().also { root.put("currencies", it) }
+        currencies.put("Coins", 999_999_999)
+        currencies.put("Gems", 9_999_999)
+        currencies.put("Keys", 9_999_999)
+        currencies.put("Cans", 999_999)
+        currencies.put("XP", 9_999_999)
+        currencies.put("SkipAdTickets", 99_999)
+
+        // Персонажи до 15 уровня
+        val chars = root.optJSONObject("characters") ?: JSONObject().also { root.put("characters", it) }
+        val allCharIds = (chars.keys().asSequence().toList() + cityCharacters.map { it.id }).distinct()
+        for (cid in allCharIds) {
+            val cObj = chars.optJSONObject(cid) ?: JSONObject()
+            cObj.put("id", cid)
+            cObj.put("unlocked", true)
+            cObj.put("level", 15)
+            cObj.put("xp", 99999)
+            cObj.put("tokens", 9999)
+            chars.put(cid, cObj)
+        }
+
+        // Районы (Districts)
+        val districts = root.optJSONObject("districts") ?: JSONObject().also { root.put("districts", it) }
+        for (did in cityDistrictIds) {
+            val dObj = districts.optJSONObject(did) ?: JSONObject()
+            dObj.put("id", did)
+            dObj.put("unlocked", true)
+            dObj.put("level", 10)
+            dObj.put("stars", 30)
+            districts.put(did, dObj)
+        }
+
+        return root.toString(2)
+    }
+
+    // =========================================================================
+    // 4. ПАТЧЕРЫ ДЛЯ CLASSIC SUBWAY SURFERS (ПО ФАЙЛАМ ПРОФИЛЯ)
+    // =========================================================================
+
+    /**
+     * Обновляет валюты в wallet.json и может добавить нераспакованные сундуки в очередь!
+     */
+    fun patchClassicWallet(
+        walletJson: String,
+        coins: Int = 999_999_999,
+        keys: Int = 999_999,
+        hoverboards: Int = 999_999,
+        headstarts: Int = 99_999,
+        scoreBoosters: Int = 99_999,
+        eventCoins: Int = 999_999,
+        seasonTokens: Int = 99_999,
+        injectSuperMysteryBoxes: Int = 0
+    ): String {
+        val root = JSONObject(walletJson)
+        root.put("lastSaved", Instant.now().toString())
+
+        val currencies = root.optJSONObject("currencies") ?: JSONObject().also { root.put("currencies", it) }
+        val map = mapOf(
+            "1" to coins,
+            "2" to keys,
+            "3" to hoverboards,
+            "4" to headstarts,
+            "5" to scoreBoosters,
+            "6" to eventCoins,
+            "12" to seasonTokens
+        )
+
+        for ((id, amount) in map) {
+            val entry = currencies.optJSONObject(id) ?: JSONObject()
+            entry.put("value", amount)
+            if (!entry.has("expirationType")) entry.put("expirationType", 0)
+            if (!entry.has("contextType")) entry.put("contextType", 0)
+            if (!entry.has("contextData")) entry.put("contextData", JSONObject())
+            currencies.put(id, entry)
+        }
+
+        if (injectSuperMysteryBoxes > 0) {
+            val queueObj = root.optJSONObject("lootboxQueue") ?: JSONObject().also { root.put("lootboxQueue", it) }
+            val unopened = queueObj.optJSONArray("unopenedLootboxes") ?: JSONArray().also { queueObj.put("unopenedLootboxes", it) }
+            repeat(injectSuperMysteryBoxes) {
+                unopened.put(JSONObject().apply {
+                    put("lootboxId", "super_mystery_box")
+                    put("source", "editor_gift")
+                })
+            }
+        }
+
+        return root.toString(2)
+    }
+
+    /**
+     * Разблокирует выбранного или ВСЕХ персонажей со всеми костюмами в characters_inventory.json
+     */
+    fun patchClassicCharacters(
+        charsJson: String,
+        targetEntries: List<CharacterCatalogEntry> = classicCharacters
+    ): String {
+        val root = JSONObject(charsJson)
+        root.put("lastSaved", Instant.now().toString())
+        val owned = root.optJSONObject("owned") ?: JSONObject().also { root.put("owned", it) }
+
+        for (entry in targetEntries) {
+            val existing = owned.optJSONObject(entry.id) ?: JSONObject()
+            existing.put("id", entry.id)
+
+            val outfitsArray = JSONArray()
+            val mergedOutfits = mutableSetOf<String>()
+            val oldArr = existing.optJSONArray("ownedOutfits")
+            if (oldArr != null) {
+                for (i in 0 until oldArr.length()) mergedOutfits.add(oldArr.getString(i))
+            }
+            mergedOutfits.addAll(entry.outfits)
+            mergedOutfits.forEach { outfitsArray.put(it) }
+
+            existing.put("ownedOutfits", outfitsArray)
+            existing.put("lastOutfit", existing.optString("lastOutfit", "default"))
+            owned.put(entry.id, existing)
+        }
+        return root.toString(2)
+    }
+
+    /**
+     * Разблокирует выбранную или ВСЕ доски со всеми способностями в boards_inventory.json
+     */
+    fun patchClassicBoards(
+        boardsJson: String,
+        targetBoards: List<BoardCatalogEntry> = classicBoards
+    ): String {
+        val root = JSONObject(boardsJson)
+        root.put("lastSaved", Instant.now().toString())
+        val owned = root.optJSONObject("owned") ?: JSONObject().also { root.put("owned", it) }
+
+        for (board in targetBoards) {
+            val existing = owned.optJSONObject(board.id) ?: JSONObject()
+            existing.put("id", board.id)
+            val upgradesObj = existing.optJSONObject("ownedUpgrades") ?: JSONObject()
+            for (upg in board.upgrades) {
+                upgradesObj.put(upg, true)
+            }
+            existing.put("ownedUpgrades", upgradesObj)
+            owned.put(board.id, existing)
+        }
+        return root.toString(2)
+    }
+
+    /**
+     * Даёт Удвоение Монет, все перманентные множители счёта (+5, +3, +1, коллекционные)
+     * и прокачивает все джетпаки/магниты/кроссовки на 6 уровень в upgrades.json
+     */
+    fun patchClassicUpgradesMax(upgradesJson: String, customExtraMultiplier: Int = 30): String {
+        val root = JSONObject(upgradesJson)
+        root.put("lastSaved", Instant.now().toString())
+
+        val scoreMods = root.optJSONObject("scoreModifiers") ?: JSONObject().also { root.put("scoreModifiers", it) }
+        val allScoreModIds = mapOf(
+            "permanent_score_multiplier" to 5,
+            "permanent_score_multiplier_3" to 3,
+            "permanent_score_multiplier_1" to 1,
+            "permanent_score_multiplier_collection_revamp_1a" to 1,
+            "permanent_score_multiplier_collection_revamp_1b" to 1,
+            "permanent_score_multiplier_collection_revamp_1c" to 1,
+            "permanent_score_multiplier_collection_revamp_1d" to 1,
+            "custom_editor_boost" to customExtraMultiplier
+        )
+
+        for ((id, value) in allScoreModIds) {
+            scoreMods.put(id, JSONObject().apply {
+                put("value", JSONObject().apply {
+                    put("id", id)
+                    put("type", 2)
+                    put("subType", 3)
+                    put("value", value)
+                })
+                put("expirationType", 0)
+                put("contextType", 0)
+                put("contextData", JSONObject())
+            })
+        }
+
+        val pickupMods = root.optJSONObject("currencyPickupModifiers") ?: JSONObject().also { root.put("currencyPickupModifiers", it) }
+        pickupMods.put("doubleCoins", JSONObject().apply {
+            put("value", JSONObject().apply {
+                put("id", "doubleCoins")
+                put("type", 0)
+                put("subType", 0)
+                put("value", 2)
+            })
+            put("expirationType", 0)
+            put("contextType", 0)
+            put("contextData", JSONObject())
+        })
+        pickupMods.put("token_multiplier_high", JSONObject().apply {
+            put("value", JSONObject().apply {
+                put("id", "token_multiplier_high")
+                put("type", 0)
+                put("subType", 2)
+                put("value", 4)
+            })
+            put("expirationValue", 999999999999999L)
+            put("expirationType", 1)
+            put("contextType", 0)
+            put("contextData", JSONObject())
+        })
+
+        val powerupLevels = root.optJSONObject("powerupLevels") ?: JSONObject().also { root.put("powerupLevels", it) }
+        powerupLevels.put("jetpack", 6)
+        powerupLevels.put("superSneakers", 6)
+        powerupLevels.put("magnet", 6)
+        powerupLevels.put("doubleScore", 6)
+
+        return root.toString(2)
+    }
+
+    /**
+     * Завершает все этапы в generic_challenges.json (Daily, Marathon, Floor is Lava, Trick or Treat, Showdown)
+     * и сбрасывает таймеры ожидания персонажей!
+     */
+    fun patchClassicChallengesComplete(challengesJson: String): String {
+        val root = JSONObject(challengesJson)
+        root.put("lastSaved", Instant.now().toString())
+        val states = root.optJSONObject("challengeStates") ?: return challengesJson
+
+        val keys = states.keys()
+        while (keys.hasNext()) {
+            val cid = keys.next()
+            val ch = states.optJSONObject(cid) ?: continue
+
+            val rewardStates = ch.optJSONArray("rewardStates")
+            var maxReqScore = 500_000
+            if (rewardStates != null) {
+                for (i in 0 until rewardStates.length()) {
+                    val rs = rewardStates.optJSONObject(i) ?: continue
+                    val req = rs.optInt("RequiredScore", 0)
+                    if (req > maxReqScore) maxReqScore = req
+                    // Статус 2 = разблокировано и готово к сбору (10 = уже собрано)
+                    if (rs.optInt("State", 0) == 0) {
+                        rs.put("State", 2)
+                    }
+                    rs.put("AdRequired", false)
+                }
+            }
+            ch.put("currentScore", maxReqScore)
+            ch.put("highScore", maxReqScore)
+            ch.put("lastSeenScore", maxReqScore)
+
+            // Очищаем кулдауны на персонажей в ивентах
+            ch.optJSONObject("requirements")?.put("cooldownItems", JSONObject())
+        }
+        return root.toString(2)
+    }
+
+    /**
+     * Разблокирует все 40+ тиров Сезонной Охоты (season_hunt.json)
+     */
+    fun patchClassicSeasonHuntMax(seasonHuntJson: String): String {
+        val root = JSONObject(seasonHuntJson)
+        root.put("lastSaved", Instant.now().toString())
+        root.put("collectedTokens", 99999)
+
+        val rewardsArr = JSONArray()
+        for (tier in 0..42) {
+            rewardsArr.put(JSONObject().apply {
+                if (tier > 0) put("tierIndex", tier)
+                put("mainRewardStatus", JSONArray().put(1)) // 1 = готово к сбору!
+            })
+        }
+        root.put("rewardsThisSeason", rewardsArr)
+        root.put("lastUnlockedTierSeen", 42)
+        return root.toString(2)
+    }
+
+    /**
+     * Выполняет все достижения (achievements_2.json) на 100% (золотой/бриллиантовый тир)
+     */
+    fun patchClassicAchievementsAll(achievementsJson: String): String {
+        val root = JSONObject(achievementsJson)
+        root.put("lastSaved", Instant.now().toString())
+        val entries = root.optJSONObject("achievementEntries") ?: return achievementsJson
+
+        val keys = entries.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            val ach = entries.optJSONObject(k) ?: continue
+            val goals = ach.optJSONArray("goals") ?: continue
+            val maxGoal = if (goals.length() > 0) goals.optInt(goals.length() - 1, 100) else 100
+
+            ach.put("currentTier", maxOf(0, goals.length() - 1))
+            ach.put("progress", maxGoal)
+            ach.put("highestProgress", maxGoal)
+
+            val claims = JSONArray()
+            for (i in 0 until goals.length()) claims.put(true)
+            ach.put("claimState", claims)
+            ach.put("markAsViewed", true)
+        }
+        return root.toString(2)
+    }
 }
