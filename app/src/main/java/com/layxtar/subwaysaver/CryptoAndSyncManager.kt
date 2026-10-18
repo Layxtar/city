@@ -396,7 +396,6 @@ object CryptoAndSyncManager {
         profile.put("purchaseHistory", purchaseHistory)
     }
 
-    // Настройка Свиньи-Копилки + возможность забрать её БЕСПЛАТНО
     fun configurePiggyBank(
         profile: JSONObject,
         piggyId: String,
@@ -555,7 +554,6 @@ object CryptoAndSyncManager {
         profile.put("missionProgresses", missions)
     }
 
-    // Открывает все виды Триалов (ивентовых забегов) в Subway City, ставит 50 ур. и убирает кулдауны
     fun maxDailyTrialsAndSkipTutorials(profile: JSONObject) {
         val trials = profile.optJSONArray("dailyTrials") ?: JSONArray()
         val existingIds = mutableSetOf<String>()
@@ -629,33 +627,4 @@ object CryptoAndSyncManager {
         }
         counters.put(JSONObject().put("CounterType", type).put("Id", id).put("Count", count))
     }
-    // 6. Разблокировка всех 114 портретов и 56 рамок профиля (profile_portrait.json и profile_frame.json)
-    fun unlockAllPortraitsAndFrames(log: (String) -> Unit) {
-        CryptoAndSyncManager.stopGameForSync(PKG_CLASSIC, true, log)
-
-        // Портреты
-        val (rawPort, portJson) = readClassicJson("profile_portrait.json", log)
-        portJson.put("patchVersion", 1)
-        if (!portJson.has("selected")) portJson.put("selected", "countcorvin_illustration_portrait")
-        val ownedPortraits = portJson.optJSONObject("owned") ?: JSONObject()
-        for (pId in ClassicDatabase.ALL_PORTRAITS) {
-            ownedPortraits.put(pId, JSONObject().put("id", pId).put("isSeen", true))
-        }
-        portJson.put("owned", ownedPortraits)
-        writeClassicJson("profile_portrait.json", rawPort, portJson, log)
-
-        // Рамки
-        val (rawFrame, frameJson) = readClassicJson("profile_frame.json", log)
-        frameJson.put("patchVersion", 1)
-        if (!frameJson.has("selected")) frameJson.put("selected", "collection_revamp_15_frame")
-        val ownedFrames = frameJson.optJSONObject("owned") ?: JSONObject()
-        for (fId in ClassicDatabase.ALL_FRAMES) {
-            ownedFrames.put(fId, JSONObject().put("id", fId).put("isSeen", true))
-        }
-        frameJson.put("owned", ownedFrames)
-        writeClassicJson("profile_frame.json", rawFrame, frameJson, log)
-
-        log("🖼️ Все 114 портретов и 56 рамок профиля успешно открыты!")
-    }
-
 }
