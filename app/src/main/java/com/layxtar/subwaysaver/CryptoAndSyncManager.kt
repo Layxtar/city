@@ -18,21 +18,23 @@ object CryptoAndSyncManager {
     const val PKG_CITY = "com.sybogames.subway.surfers.game"
     const val PKG_CLASSIC = "com.kiloo.subwaysurf"
 
+    // Жестко фиксируем правильный путь, который ты указал
     private val CITY_PATHS = listOf(
-        "/storage/emulated/0/Android/data/$PKG_CITY/files/enc/profile",
         "/storage/emulated/0/Android/data/$PKG_CITY/files/enc",
-        "/storage/emulated/0/Android/data/$PKG_CITY/files/profile",
-        "/data/data/$PKG_CITY/files/enc/profile"
+        "/storage/emulated/0/Android/data/com.sybogames.subway.surfers.game/files/enc/profile",
+        "/storage/emulated/0/Android/data/$PKG_CITY/files/profile"
     )
+
+    const val CLASSIC_WALLET_PATH = "/storage/emulated/0/Android/data/$PKG_CLASSIC/files/profile/wallet.json"
 
     fun checkShizukuPermission(log: (String) -> Unit): Boolean {
         if (!Shizuku.pingBinder()) {
-            log("❌ Shizuku не запущен или нет связи с сервером (pingBinder = false)")
+            log("❌ Shizuku не запущен или нет связи с сервером")
             return false
         }
         val hasPerm = Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         if (hasPerm) {
-            log("✅ Разрешение Shizuku уже получено")
+            log("✅ Разрешение Shizuku получено")
             return true
         } else {
             log("⚠️ Запрос разрешения Shizuku...")
@@ -59,73 +61,102 @@ object CryptoAndSyncManager {
             val errOutput = process.errorStream.bufferedReader().readText()
             val code = process.waitFor()
             if (errOutput.isNotEmpty()) {
-                log("⚙️ [Shizuku stderr]: $errOutput")
+                log("⚙️ [stderr]: $errOutput")
             }
             code to output
         } catch (e: Exception) {
-            log("⚠️ Ошибка рефлексии Shizuku: ${e.message}. Пробуем через Runtime.exec...")
+            log("⚠️ Ошибка рефлексии: ${e.message}. Пробуем Runtime...")
             try {
                 val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
                 val out = p.inputStream.bufferedReader().readText()
-                val code = p.waitFor()
-                code to out
+                p.waitFor() to out
             } catch (ex: Exception) {
-                log("❌ Ошибка выполнения shell: ${ex.message}")
+                log("❌ Ошибка shell: ${ex.message}")
                 -1 to (ex.message ?: "Unknown error")
             }
         }
     }
 
     fun findCitySavePath(log: (String) -> Unit): String? {
-        log("🔍 Поиск файла сохранения в директориях игры...")
-        for (path in CITY_PATHS) {
-            val cmd = "if [ -f '$path' ]; then echo 'FILE'; elif [ -d '$path' ]; then ls -1 '$path' | head -n 1; fi"
+        log("🔍 Поиск файла сохранения Subway Surfers City...")
+        for (basePath in CITY_PATHS) {
+            log("📁 Проверка папки: $basePath")
+            val cmd = "if [ -f '$basePath' ]; then echo 'FILE'; elif [ -d '$basePath' ]; then ls -1 '$basePath' 2>/dev/null; fi"
             val (code, out) = execSh(cmd, log)
-            log("📁 Проверка пути $path -> код: $code, ответ: '${out.trim()}'")
+            log("⚙️ Результат ls (код $code): '${out.trim()}'")
+
             if (code == 0 && out.trim() == "FILE") {
-                log("🎯 Найден файл сохранения: $path")
-                return path
+                log("🎯 Найден файл по пути: $basePath")
+                return basePath
             }
-            if (code == 0 && out.trim().isNotEmpty()) {
-                val resolved = "$path/${out.trim()}"
-                log("🎯 Найден файл внутри папки: $resolved")
-                return resolved
+            // Если внутри папки есть файлы (например, сам сейв или папка profile)
+            val files = out.trim().split("\n")
+            for (f in files) {
+                if (f.isNotEmpty()) {
+                    val fullPath = if (basePath.endsWith("enc") || basePath.endsWith("profile")) "$basePath/$f" else basePath
+                    // Проверим, файл ли это
+                    val (c2, o2) = execSh("if [ -f '$fullPath' ]; then echo 'YES'; fi", log)
+                    if (c2 == 0 && o2.trim() == "YES") {
+                        log("🎯 Найден точный файл сохранения: $fullPath")
+                        return fullPath
+                    }
+                }
             }
         }
-        log("❌ Автоматический поиск не нашёл файл. Проверьте, установлена ли игра и запущен ли уровень.")
-        return null
+        // Если автопоиск не сработал, возвращаем прямой проверенный путь
+        val fallback = "/storage/emulated/0/Android/data/$PKG_CITY/files/enc"
+        log("⚠️ Используем принудительный базовый путь: $fallback")
+        return fallback
     }
 
     fun pullSaveFile(remotePath: String, localTempFile: File, packageName: String, log: (String) -> Unit): Boolean {
-        log("🛑 Принудительная остановка игры ($packageName)...")
+        log("🛑 Остановка игры ($packageName)...")
         execSh("am force-stop $packageName", log)
 
-        log("📥 Копирование файла из: $remotePath")
-        val (code, out) = execSh("cat '$remotePath' > '${localTempFile.absolutePath}'", log)
-        log("📥 Результат cat: код $code, вывод: $out")
+        log("📥 Чтение файла через base64: $remotePath")
+        val (code, out) = execSh("base64 < '$remotePath'", log)
+        log("📥 Результат base64 read: код $code, длина ответа: ${out.length}")
 
-        val exists = localTempFile.exists()
-        val len = if (exists) localTempFile.length() else 0L
-        log("📦 Временный файл создан: $exists, размер: $len байт")
-
-        return code == 0 && exists && len > 32
+        if (code == 0 && out.trim().isNotEmpty()) {
+            try {
+                val cleanBase64 = out.replace(Regex("\\s+"), "")
+                val bytes = android.util.Base64.decode(cleanBase64, android.util.Base64.DEFAULT)
+                localTempFile.writeBytes(bytes)
+                log("📦 Успешно! Записано во временный файл: ${bytes.size} байт")
+                return bytes.size > 32
+            } catch (e: Exception) {
+                log("❌ Ошибка декодирования base64: ${e.message}")
+                return false
+            }
+        } else {
+            log("❌ Не удалось прочитать файл. Проверь, запущен ли уровень в игре.")
+            return false
+        }
     }
 
     fun pushAndSyncSaveFile(localTempFile: File, remotePath: String, packageName: String, log: (String) -> Unit): Boolean {
-        log("🛑 Принудительная остановка игры перед записью...")
+        log("🛑 Остановка игры перед записью...")
         execSh("am force-stop $packageName", log)
 
-        log("📑 Создание бэкапа оригинального файла...")
+        log("📑 Создание бэкапа (.bak_editor)...")
         execSh("cp '$remotePath' '$remotePath.bak_editor'", log)
 
-        log("💾 Запись измененного файла на устройство...")
-        val (code, out) = execSh("cat '${localTempFile.absolutePath}' > '$remotePath'", log)
-        log("💾 Результат записи cat: код $code, вывод: $out")
+        log("💾 Запись измененного файла через base64...")
+        try {
+            val bytes = localTempFile.readBytes()
+            val base64Data = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            
+            val (code, out) = execSh("echo '$base64Data' | base64 -d > '$remotePath'", log)
+            log("💾 Результат записи: код $code, вывод: $out")
 
-        val parentDir = File(remotePath).parent
-        execSh("rm -f '$parentDir'/*.tmp '$parentDir'/*.temp", log)
+            val parentDir = File(remotePath).parent
+            execSh("rm -f '$parentDir'/*.tmp '$parentDir'/*.temp", log)
 
-        return code == 0
+            return code == 0
+        } catch (e: Exception) {
+            log("❌ Ошибка записи: ${e.message}")
+            return false
+        }
     }
 
     fun decryptCityProfile(rawBytes: ByteArray): Pair<JSONObject, JSONObject> {
