@@ -32,11 +32,8 @@ object CryptoAndSyncManager {
         "/storage/emulated/0/Android/data/$PKG_CITY/files/profile"
     )
 
-    const val CLASSIC_WALLET_PATH =
-        "/storage/emulated/0/Android/data/$PKG_CLASSIC/files/profile/wallet.json"
-
     const val DEFAULT_SAVE_DIR = "/storage/emulated/0/Download/CityEdit"
-    private const val CHUNK_SIZE = 49152 // 48 KB как в ShizukuBridge.cs
+    private const val CHUNK_SIZE = 49152
 
     private var listenerRegistered = false
     var onPermissionGrantedCallback: ((Boolean) -> Unit)? = null
@@ -62,21 +59,11 @@ object CryptoAndSyncManager {
         } catch (_: Exception) { }
     }
 
-    fun isServiceRunning(): Boolean {
-        return try {
-            Shizuku.pingBinder()
-        } catch (_: Exception) {
-            false
-        }
-    }
+    fun isServiceRunning(): Boolean = try { Shizuku.pingBinder() } catch (_: Exception) { false }
 
-    fun hasPermission(): Boolean {
-        return try {
-            isServiceRunning() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
-        } catch (_: Exception) {
-            false
-        }
-    }
+    fun hasPermission(): Boolean = try {
+        isServiceRunning() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+    } catch (_: Exception) { false }
 
     fun requestPermissionOrOpenShizuku(context: Context, log: (String) -> Unit) {
         try {
@@ -90,7 +77,7 @@ object CryptoAndSyncManager {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(intent)
                 } else {
-                    log("❌ Приложение Shizuku ($PKG_SHIZUKU) не найдено на устройстве!")
+                    log("❌ Приложение Shizuku ($PKG_SHIZUKU) не найдено!")
                 }
             }
         } catch (e: Exception) {
@@ -98,7 +85,6 @@ object CryptoAndSyncManager {
         }
     }
 
-    // Выполнение shell-команд через рефлексию Shizuku.newProcess (аналог ShizukuBridge.cs)
     fun execSh(command: String, log: ((String) -> Unit)? = null): Pair<Int, String> {
         return try {
             val method = Shizuku::class.java.getDeclaredMethod(
@@ -112,9 +98,7 @@ object CryptoAndSyncManager {
             val output = process.inputStream.bufferedReader().readText()
             val errOutput = process.errorStream.bufferedReader().readText()
             val code = process.waitFor()
-            if (errOutput.isNotBlank()) {
-                log?.invoke("⚙️ [stderr]: ${errOutput.trim()}")
-            }
+            if (errOutput.isNotBlank()) log?.invoke("⚙️ [stderr]: ${errOutput.trim()}")
             code to (output + errOutput)
         } catch (e: Exception) {
             log?.invoke("⚠️ Ошибка Shizuku shell: ${e.message}")
@@ -128,57 +112,40 @@ object CryptoAndSyncManager {
     }
 
     fun resolveCityProfilePath(log: (String) -> Unit): String {
-        if (fileExists(DEFAULT_GAME_PROFILE_PATH)) {
-            log("🎯 Найден профиль: $DEFAULT_GAME_PROFILE_PATH")
-            return DEFAULT_GAME_PROFILE_PATH
-        }
+        if (fileExists(DEFAULT_GAME_PROFILE_PATH)) return DEFAULT_GAME_PROFILE_PATH
         for (path in FALLBACK_CITY_PATHS) {
             val (code, out) = execSh("if [ -f '$path' ]; then echo 'FILE'; elif [ -d '$path' ]; then ls -1 '$path' 2>/dev/null | head -n 1; fi")
             if (code == 0 && out.trim() == "FILE") return path
             if (code == 0 && out.trim().isNotEmpty()) {
                 val candidate = "$path/${out.trim()}"
-                if (fileExists(candidate)) {
-                    log("🎯 Найден профиль: $candidate")
-                    return candidate
-                }
+                if (fileExists(candidate)) return candidate
             }
         }
-        log("⚠️ Используется стандартный путь: $DEFAULT_GAME_PROFILE_PATH")
         return DEFAULT_GAME_PROFILE_PATH
     }
 
-    // Чтение файла: cat -> base64 -> decode (как в ShizukuBridge.ReadFile)
     fun readFileViaShizuku(path: String, log: (String) -> Unit): ByteArray? {
         log("📥 Чтение файла: $path")
         val (code, result) = execSh("cat '$path' | base64 2>&1", log)
-        if (code != 0 || result.isBlank()) {
-            log("❌ Пустой ответ или ошибка при чтении файла (код $code)")
-            return null
-        }
+        if (code != 0 || result.isBlank()) return null
         return try {
             val cleanBase64 = result.replace("\n", "").replace("\r", "").replace(Regex("\\s+"), "").trim()
             val data = Base64.decode(cleanBase64, Base64.DEFAULT)
-            log("📦 Прочитано ${data.size} байт")
-            if (data.size >= 32) data else null
+            if (data.isNotEmpty()) data else null
         } catch (e: Exception) {
             log("❌ Ошибка декодирования Base64: ${e.message}")
             null
         }
     }
 
-    // Запись файла чанками по 48KB через /data/local/tmp + cp + sync (как в ShizukuBridge.WriteFile)
     fun writeFileViaShizuku(path: String, data: ByteArray, log: (String) -> Unit): Boolean {
         val uuid = UUID.randomUUID().toString().replace("-", "")
         val tempB64 = "/data/local/tmp/ce_b64_$uuid"
         val tempFile = "/data/local/tmp/ce_w_$uuid"
 
         return try {
-            // Создаём резервную копию перед записью
             execSh("cp '$path' '$path.bak_editor' 2>/dev/null")
-
             val base64 = Base64.encodeToString(data, Base64.NO_WRAP)
-            log("💾 Запись ${data.size} байт (Base64: ${base64.length} симв.) чанками по 48 КБ...")
-
             var offset = 0
             while (offset < base64.length) {
                 val len = minOf(CHUNK_SIZE, base64.length - offset)
@@ -187,75 +154,49 @@ object CryptoAndSyncManager {
                 execSh("printf '%s' '$chunk' $op '$tempB64'")
                 offset += CHUNK_SIZE
             }
-
             execSh("base64 -d '$tempB64' > '$tempFile'", log)
             val (_, result) = execSh("cp '$tempFile' '$path' 2>&1 && echo 'DONE'", log)
-            if (!result.contains("DONE")) {
-                log("❌ Ошибка копирования в профиль: ${result.trim()}")
-                return false
-            }
+            if (!result.contains("DONE")) return false
 
-            val parentDir = File(path).parent
-            if (parentDir != null) {
+            File(path).parent?.let { parentDir ->
                 execSh("rm -f '$parentDir'/*.tmp '$parentDir'/*.temp 2>/dev/null")
             }
-
             execSh("sync")
-            log("✅ Файл записан и сброшен на диск (sync выполнен)!")
+            log("✅ Файл успешно записан: $path")
             true
         } catch (e: Exception) {
             log("❌ Исключение при записи: ${e.message}")
             false
         } finally {
-            try {
-                execSh("rm -f '$tempB64' '$tempFile' 2>/dev/null")
-            } catch (_: Exception) { }
+            try { execSh("rm -f '$tempB64' '$tempFile' 2>/dev/null") } catch (_: Exception) { }
         }
     }
 
-    // Остановка игры (am kill + am force-stop для защиты от перезаписи из ОЗУ)
     fun stopGameForSync(packageName: String = PKG_CITY, hardStop: Boolean = true, log: (String) -> Unit) {
-        if (hardStop) {
-            log("🛑 Остановка процесса игры (am force-stop $packageName)...")
-            execSh("am force-stop $packageName")
-        } else {
-            log("🛑 Мягкая выгрузка игры (am kill $packageName)...")
-            execSh("am kill $packageName")
-        }
+        if (hardStop) execSh("am force-stop $packageName") else execSh("am kill $packageName")
     }
 
-    // Запуск игры через monkey с fallback на Intent (как в AndroidFileAccessService.LaunchGame)
     fun launchGame(context: Context, packageName: String = PKG_CITY, log: (String) -> Unit) {
-        log("🚀 Запуск игры ($packageName) через Shizuku monkey...")
+        log("🚀 Запуск игры ($packageName)...")
         val (code, _) = execSh("monkey -p $packageName -c android.intent.category.LAUNCHER 1", log)
         if (code != 0) {
-            log("⚠️ Monkey вернул код $code, запускаем через Android Intent...")
-            try {
-                val intent = context.packageManager?.getLaunchIntentForPackage(packageName)
-                if (intent != null) {
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(intent)
-                } else {
-                    log("❌ Игра $packageName не найдена!")
-                }
-            } catch (e: Exception) {
-                log("❌ Ошибка запуска: ${e.message}")
+            val intent = context.packageManager?.getLaunchIntentForPackage(packageName)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
             }
         }
     }
 
-    // Экспорт в /storage/emulated/0/Download/CityEdit
     fun exportToDownloadDir(fileName: String, bytes: ByteArray, log: (String) -> Unit): Boolean {
         return try {
             val dir = File(DEFAULT_SAVE_DIR)
             if (!dir.exists()) dir.mkdirs()
             val outFile = File(dir, fileName)
             outFile.writeBytes(bytes)
-            log("📂 Файл сохранён: ${outFile.absolutePath}")
+            log("📂 Экспортировано в: ${outFile.absolutePath}")
             true
-        } catch (e: Exception) {
-            // Если нет прямого доступа к Download, сохраняем через Shizuku
-            log("⚠️ Прямая запись не удалась, пробуем через Shizuku в $DEFAULT_SAVE_DIR/$fileName...")
+        } catch (_: Exception) {
             execSh("mkdir -p '$DEFAULT_SAVE_DIR'")
             writeFileViaShizuku("$DEFAULT_SAVE_DIR/$fileName", bytes, log)
         }
@@ -266,8 +207,6 @@ object CryptoAndSyncManager {
         val (_, out) = execSh("if [ -f '$path.bak_editor' ]; then cp '$path.bak_editor' '$path' && sync && echo 'RESTORED'; fi", log)
         return out.contains("RESTORED")
     }
-
-    // ==================== ДЕШИФРОВКА И ШИФРОВАНИЕ AES-ECB ====================
 
     fun decryptCityProfile(rawBytes: ByteArray): Pair<JSONObject, JSONObject> {
         require(rawBytes.size >= 32) { "Файл слишком мал (< 32 байт)" }
@@ -299,7 +238,6 @@ object CryptoAndSyncManager {
         val iv = originalRawBytes.copyOfRange(0, 16)
         val key = originalRawBytes.copyOfRange(16, 32)
 
-        // Защита от отката сохранения: ставим время на 5 минут вперёд
         val futureTime = Instant.now().plusSeconds(300)
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSS'Z'").withZone(ZoneOffset.UTC)
         containerJson.put("lastUpdated", formatter.format(futureTime))
@@ -341,8 +279,6 @@ object CryptoAndSyncManager {
             if (carry == 0) break
         }
     }
-
-    // ==================== ФУНКЦИИ МОДИФИКАЦИИ ПРОФИЛЯ ====================
 
     fun unlockAndMaxAllSurfers(profile: JSONObject, customHighScore: Long = 25000000L) {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
@@ -430,6 +366,9 @@ object CryptoAndSyncManager {
         for (productId in GameDatabase.ALL_IAP_PURCHASES) {
             purchaseHistory.put(productId, JSONObject().put("PurchaseCount", 1).put("PurchaseDates", JSONArray().put(nowIso)))
         }
+        for ((piggyId, _) in GameDatabase.PIGGY_BANKS) {
+            purchaseHistory.put(piggyId, JSONObject().put("PurchaseCount", 1).put("PurchaseDates", JSONArray().put(nowIso)))
+        }
         profile.put("purchaseHistory", purchaseHistory)
         profile.put("seasonPassPurchased", true)
         profile.put("hasSeenPremiumPassActivation", true)
@@ -457,14 +396,32 @@ object CryptoAndSyncManager {
         profile.put("purchaseHistory", purchaseHistory)
     }
 
-    fun configurePiggyBank(profile: JSONObject, piggyId: String, missionId: Long, progressAmount: Int, isFilled: Boolean) {
+    // Настройка Свиньи-Копилки + возможность забрать её БЕСПЛАТНО
+    fun configurePiggyBank(
+        profile: JSONObject,
+        piggyId: String,
+        missionId: Long,
+        progressAmount: Int,
+        isFilled: Boolean,
+        makeFreeToClaim: Boolean = true
+    ) {
         profile.put("piggyBank", JSONObject().apply {
             put("currentId", piggyId)
             put("lastSeenProgress", progressAmount)
             put("skippedCount", 0)
             put("lastSentAnalyticsProgress", 10)
             put("isFilled", isFilled)
+            put("isFree", makeFreeToClaim)
+            put("canClaimForFree", makeFreeToClaim)
         })
+
+        if (makeFreeToClaim) {
+            val purchaseHistory = profile.optJSONObject("purchaseHistory") ?: JSONObject()
+            val nowIso = Instant.now().toString()
+            purchaseHistory.put(piggyId, JSONObject().put("PurchaseCount", 1).put("PurchaseDates", JSONArray().put(nowIso)))
+            profile.put("purchaseHistory", purchaseHistory)
+        }
+
         val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
         var found = false
         for (i in 0 until missions.length()) {
@@ -492,7 +449,7 @@ object CryptoAndSyncManager {
         profile.put("activeScheduledCampaignProfile", JSONObject().apply {
             put("activeScheduledCampaignId", campaignId)
             put("playableSurfers", JSONArray().apply {
-                put(-1836944478L); put(1900660162L); put(2129411796L); put(-496667767L)
+                for ((sId, _) in GameDatabase.SURFERS) put(sId)
             })
         })
         val goals = profile.optJSONArray("goals") ?: JSONArray()
@@ -598,13 +555,27 @@ object CryptoAndSyncManager {
         profile.put("missionProgresses", missions)
     }
 
+    // Открывает все виды Триалов (ивентовых забегов) в Subway City, ставит 50 ур. и убирает кулдауны
     fun maxDailyTrialsAndSkipTutorials(profile: JSONObject) {
         val trials = profile.optJSONArray("dailyTrials") ?: JSONArray()
+        val existingIds = mutableSetOf<String>()
         for (i in 0 until trials.length()) {
-            trials.getJSONObject(i).apply {
-                put("currentLevelIndex", 49)
-                put("attempts", 0)
-                put("claimedGoalRewards", 0)
+            val tObj = trials.getJSONObject(i)
+            tObj.put("currentLevelIndex", 49)
+            tObj.put("attempts", 0)
+            tObj.put("claimedGoalRewards", 0)
+            tObj.put("isUnlocked", true)
+            existingIds.add(tObj.optString("id"))
+        }
+        for ((tId, _) in GameDatabase.DAILY_TRIALS) {
+            if (existingIds.add(tId)) {
+                trials.put(JSONObject().apply {
+                    put("id", tId)
+                    put("currentLevelIndex", 49)
+                    put("attempts", 0)
+                    put("claimedGoalRewards", 0)
+                    put("isUnlocked", true)
+                })
             }
         }
         profile.put("dailyTrials", trials)
@@ -622,7 +593,7 @@ object CryptoAndSyncManager {
         val (_, findOut) = execSh("find /storage/emulated/0/Android/data/$PKG_CITY -name 'manifest.json' 2>/dev/null | head -n 1")
         val manifestPath = findOut.trim()
         if (manifestPath.isEmpty()) {
-            val msg = "ℹ️ Кэш manifest.json не найден (конфиги внутри APK). Все читы применены напрямую в профиль!"
+            val msg = "ℹ️ Кэш manifest.json не найден. Все читы применены напрямую в профиль!"
             log(msg)
             return msg
         }
