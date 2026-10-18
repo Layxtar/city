@@ -37,14 +37,14 @@ object CryptoAndSyncManager {
         }
     }
 
-    // Безопасный запуск через рефлексию Shizuku, обходящий любые ошибки видимости компилятора
+    // Безопасный запуск через рефлексию Shizuku с исправленными типами классов
     fun execSh(command: String): Pair<Int, String> {
         return try {
             val method = Shizuku::class.java.getDeclaredMethod(
                 "newProcess",
                 Array<String>::class.java,
-                Array<String>::java,
-                String::java
+                Array<String>::class.java,
+                String::class.java
             )
             method.isAccessible = true
             val process = method.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
