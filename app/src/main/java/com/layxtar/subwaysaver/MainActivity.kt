@@ -116,7 +116,11 @@ fun MainScreen(onRequestPermission: () -> Unit) {
                         val isShizukuOn = ShizukuShellManager.isShizukuAvailable()
                         val hasPerm = ShizukuShellManager.hasPermission()
                         Text("Shizuku Статус: ${if (isShizukuOn) "Активен" else "Не найден"}", color = if (isShizukuOn) Color.Green else Color.Red)
-                        Text("Права ROOT/ADB: ${if (hasPerm) "Выданы" * Color.Green else "Требуются" * Color.Yellow}")
+                        Text(
+    text = "Права ROOT/ADB: ${if (hasPerm) "Выданы" else "Требуются"}",
+    color = if (hasPerm) Color.Green else Color.Yellow
+)
+
                         
                         Spacer(modifier = Modifier.height(8.dp))
                         if (!hasPerm) {
