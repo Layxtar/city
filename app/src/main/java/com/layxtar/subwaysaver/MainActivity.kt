@@ -43,7 +43,6 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UltimateEditorApp(activity: ComponentActivity) {
-    // Режим приложения: true = Subway Surfers City, false = Classic Subway Surfers
     var isCityMode by remember { mutableStateOf(true) }
     var selectedTab by remember { mutableIntStateOf(0) }
     var statusText by remember { mutableStateOf("🔄 Автозагрузка профиля через Shizuku...") }
@@ -54,7 +53,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
         logs = "$msg\n$logs"
     }
 
-    // Состояния Subway Surfers City
     var rawFileBytes by remember { mutableStateOf<ByteArray?>(null) }
     var containerJson by remember { mutableStateOf<JSONObject?>(null) }
     var profileJson by remember { mutableStateOf<JSONObject?>(null) }
@@ -97,7 +95,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
     var crewSlot3 by remember { mutableLongStateOf(852717139L) }
     var rawJsonText by remember { mutableStateOf("") }
 
-    // ==================== СОСТОЯНИЯ CLASSIC SUBWAY SURFERS ====================
     val classicCurrencies = remember {
         mutableStateMapOf<String, String>().apply {
             ClassicDatabase.CURRENCIES.forEach { (id, _) -> put(id, "9999999") }
@@ -179,7 +176,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                 val v = currencies.optJSONObject(id)?.optLong("value", 0L) ?: 0L
                 classicCurrencies[id] = v.toString()
             }
-            log("✅ Кошелёк Classic Subway Surfers успешно загружен!")
+            log("✅ Кошелёк Classic успешно загружен!")
         }
     }
 
@@ -201,7 +198,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                     profileJson = prof
                     refreshUIFromCityProfile(prof)
                     isCityLoaded = true
-                    log("✅ Профиль City автоматически загружен (${bytes.size} байт)!")
+                    log("✅ Профиль City автоматически загружен!")
                 } catch (e: Exception) {
                     log("❌ Ошибка расшифровки City: ${e.message}")
                 }
@@ -307,7 +304,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
             Spacer(modifier = Modifier.height(6.dp))
 
             if (isCityMode) {
-                // ==================== РЕЖИМ SUBWAY SURFERS CITY ====================
                 when (selectedTab) {
                     0 -> {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -320,7 +316,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             OutlinedTextField(
                                 value = currencyStates[tag] ?: "0",
                                 onValueChange = { currencyStates[tag] = it },
-                                label = { Text("$label [ID:$tag]") },
+                                label = { Text("$label [ID: $tag]") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -344,26 +340,26 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                     CryptoAndSyncManager.maxDailyTrialsAndSkipTutorials(it)
                                     CryptoAndSyncManager.configurePiggyBank(it, "shop.piggybankmlp7.3", -2000200805L, 250000, true, true)
                                     refreshUIFromCityProfile(it)
-                                    log("👑 GOD-MODE CITY АКТИВИРОВАН: Открыто всё + Триалы + Бесплатная Свинья!")
+                                    log("👑 GOD-MODE CITY АКТИВИРОВАН!")
                                 }
                             }
-                        ) { Text("👑 GOD-MODE CITY (ВСЁ + ТРИАЛЫ + БЕСПЛАТНАЯ СВИНЬЯ)", color = Color.White, fontWeight = FontWeight.Bold) }
+                        ) { Text("👑 GOD-MODE CITY (ВСЁ + ТРИАЛЫ + СВИНЬЯ)", color = Color.White, fontWeight = FontWeight.Bold) }
 
                         Button(modifier = Modifier.fillMaxWidth(), onClick = {
                             profileJson?.let {
                                 CryptoAndSyncManager.maxDailyTrialsAndSkipTutorials(it)
                                 refreshUIFromCityProfile(it)
-                                log("🏁 Все 6 видов Триалов (ивентовых забегов) открыты на 50 уровне без кулдаунов!")
+                                log("🏁 Все Триалы открыты на 50 уровне!")
                             }
-                        }) { Text("🏁 Открыть все Триалы (Ивентовые забеги 50 Ур.)") }
+                        }) { Text("🏁 Открыть все Триалы (50 Ур.)") }
 
                         Button(modifier = Modifier.fillMaxWidth(), onClick = {
                             profileJson?.let {
                                 CryptoAndSyncManager.configurePiggyBank(it, "shop.piggybankmlp7.3", -2000200805L, 250000, true, true)
                                 refreshUIFromCityProfile(it)
-                                log("🐷 Свинья-копилка заполнена на 250 000 монет и разблокирована для БЕСПЛАТНОГО сбора!")
+                                log("🐷 Свинья-копилка разблокирована для бесплатного сбора!")
                             }
-                        }) { Text("🐷 Сделать Свинью-Копилку БЕСПЛАТНОЙ (250 000 монет)") }
+                        }) { Text("🐷 Сделать Свинью-Копилку БЕСПЛАТНОЙ") }
                     }
 
                     2 -> {
@@ -394,13 +390,13 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                 OutlinedTextField(value = piggyProgress, onValueChange = { piggyProgress = it }, label = { Text("Монет в копилке") }, modifier = Modifier.fillMaxWidth())
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Checkbox(checked = piggyFreeClaim, onCheckedChange = { piggyFreeClaim = it })
-                                    Text("Забрать копилку БЕСПЛАТНО (добавить в купленные IAP)")
+                                    Text("Забрать копилку БЕСПЛАТНО")
                                 }
                                 Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                     profileJson?.let {
                                         CryptoAndSyncManager.configurePiggyBank(it, selectedPiggyId, selectedPiggyMission, piggyProgress.toIntOrNull() ?: 250000, piggyFilled, piggyFreeClaim)
                                         refreshUIFromCityProfile(it)
-                                        log("🐷 Копилка обновлена (Бесплатный сбор = $piggyFreeClaim)!")
+                                        log("🐷 Копилка обновлена!")
                                     }
                                 }) { Text("🐷 Применить Копилку") }
                             }
@@ -412,9 +408,9 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             profileJson?.let {
                                 CryptoAndSyncManager.activateScheduledCampaign(it, selectedCampaignId)
                                 refreshUIFromCityProfile(it)
-                                log("🎢 Ивентовая трасса $selectedCampaignId открыта для всех сёрферов!")
+                                log("🎢 Ивентовая трасса $selectedCampaignId открыта!")
                             }
-                        }) { Text("🎢 Открыть выбранную трассу (Weekly Wonders)") }
+                        }) { Text("🎢 Открыть выбранную трассу") }
                         GameDatabase.SCHEDULED_CAMPAIGNS.forEach { (cId, cTitle) ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 RadioButton(selected = selectedCampaignId == cId, onClick = { selectedCampaignId = cId })
@@ -425,7 +421,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
 
                     5 -> {
                         OutlinedTextField(value = playerName, onValueChange = { playerName = it }, label = { Text("Никнейм игрока") }, modifier = Modifier.fillMaxWidth())
-                        OutlinedTextField(value = boostedMultiplier, onValueChange = { boostedMultiplier = it }, label = { Text("Буст забега (x3..x50)") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(value = boostedMultiplier, onValueChange = { boostedMultiplier = it }, label = { Text("Буст забега") }, modifier = Modifier.fillMaxWidth())
                     }
 
                     6 -> {
@@ -445,29 +441,25 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                     }
                 }
             } else {
-                // ==================== РЕЖИМ CLASSIC SUBWAY SURFERS ====================
                 when (selectedTab) {
-                    // Вкладка 0: Валюта, Билеты Забегов, SkipAdTickets
                     0 -> {
-                        Text("Редактор `wallet.json` (путь `/storage/emulated/0/Android/data/com.kiloo.subwaysurf/files/profile/wallet.json`):", fontSize = 12.sp, color = Color.Gray)
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Button(modifier = Modifier.weight(1f), onClick = {
                                 ClassicDatabase.CURRENCIES.forEach { (id, _) -> classicCurrencies[id] = "99999999" }
-                                log("💎 Все валюты, билеты арен и жетоны Classic выставлены на 99 999 999!")
+                                log("💎 Все валюты Classic выставлены на 99.9M!")
                             }) { Text("💎 ВСЁ НА 99.9M") }
                         }
                         ClassicDatabase.CURRENCIES.forEach { (id, title) ->
                             OutlinedTextField(
                                 value = classicCurrencies[id] ?: "9999999",
                                 onValueChange = { classicCurrencies[id] = it },
-                                label = { Text("$title [ID:$id]") },
+                                label = { Text("$title [ID: $id]") },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
 
-                    // Вкладка 1: Мега-Читы для Classic (Двойные монеты, Убрать рекламу, Открыть донат)
                     1 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -481,9 +473,10 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                         ClassicCryptoAndSyncManager.unlockClassicSurfers(null, null, ::log)
                                         ClassicCryptoAndSyncManager.unlockClassicBoards(null, null, ::log)
                                         ClassicCryptoAndSyncManager.maxSeasonHuntMissionsAndAchievements(::log)
+                                        ClassicCryptoAndSyncManager.unlockAllPortraitsAndFrames(::log)
                                         log("👑 CLASSIC GOD-MODE АКТИВИРОВАН!")
                                     }
-                                ) { Text("👑 АКТИВИРОВАТЬ GOD-MODE ДЛЯ CLASSIC", color = Color.White, fontWeight = FontWeight.Bold) }
+                                ) { Text("👑 GOD-MODE ДЛЯ CLASSIC (ВСЁ + ПОРТРЕТЫ + РАМКИ)", color = Color.White, fontWeight = FontWeight.Bold) }
 
                                 Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                     ClassicCryptoAndSyncManager.unlockDoubleCoinsAndMaxUpgrades(::log)
@@ -492,27 +485,27 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                 Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                     val map = classicCurrencies.mapValues { it.value.toLongOrNull() ?: 9999999L }
                                     ClassicCryptoAndSyncManager.updateWalletAndInjectDonations(map, true, null, 0, ::log)
-                                    log("🚫 Реклама отключена (no_ads_bundle + SkipAdTickets), весь донат активирован!")
-                                }) { Text("🚫 Убрать рекламу + Открыть Донат и Surfer Pass") }
+                                    log("🚫 Реклама отключена, весь донат активирован!")
+                                }) { Text("🚫 Убрать рекламу + Открыть Донат") }
 
                                 Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                     ClassicCryptoAndSyncManager.maxSeasonHuntMissionsAndAchievements(::log)
-                                }) { Text("🏆 Закрыть Season Hunt (40 тиров) + Ачивки + Трофеи") }
+                                    ClassicCryptoAndSyncManager.unlockAllPortraitsAndFrames(::log)
+                                }) { Text("🏆 Открыть все Портреты (114), Рамки (56) и Трофеи") }
                             }
                         }
                     }
 
-                    // Вкладка 2: Поиск и разблокировка Сёрферов Classic
                     2 -> {
                         OutlinedTextField(
                             value = classicSearchQuery,
                             onValueChange = { classicSearchQuery = it },
-                            label = { Text("🔍 Поиск сёрфера по имени или ID...") },
+                            label = { Text("🔍 Поиск сёрфера...") },
                             modifier = Modifier.fillMaxWidth()
                         )
                         Button(modifier = Modifier.fillMaxWidth(), onClick = {
                             ClassicCryptoAndSyncManager.unlockClassicSurfers(null, null, ::log)
-                        }) { Text("🏄 Открыть ВСЕХ сёрферов и костюмы в 1 клик") }
+                        }) { Text("🏄 Открыть ВСЕХ сёрферов в 1 клик") }
 
                         val filteredSurfers = ClassicDatabase.CLASSIC_SURFERS.filter {
                             it.first.contains(classicSearchQuery, ignoreCase = true) ||
@@ -529,32 +522,27 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                        Text("ID: $id | Костюмов: ${outfits.size} (${outfits.joinToString()})", fontSize = 11.sp, color = Color.Gray)
+                                        Text("ID: $id | Костюмов: ${outfits.size}", fontSize = 11.sp, color = Color.Gray)
                                     }
                                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        OutlinedButton(onClick = {
-                                            ClassicCryptoAndSyncManager.unlockClassicSurfers(id, null, ::log)
-                                        }) { Text("Открыть", fontSize = 11.sp) }
-                                        Button(onClick = {
-                                            ClassicCryptoAndSyncManager.unlockClassicSurfers(id, id, ::log)
-                                        }) { Text("Выбрать", fontSize = 11.sp) }
+                                        OutlinedButton(onClick = { ClassicCryptoAndSyncManager.unlockClassicSurfers(id, null, ::log) }) { Text("Открыть", fontSize = 11.sp) }
+                                        Button(onClick = { ClassicCryptoAndSyncManager.unlockClassicSurfers(id, id, ::log) }) { Text("Выбрать", fontSize = 11.sp) }
                                     }
                                 }
                             }
                         }
                     }
 
-                    // Вкладка 3: Поиск и разблокировка Досок Classic
                     3 -> {
                         OutlinedTextField(
                             value = classicSearchQuery,
                             onValueChange = { classicSearchQuery = it },
-                            label = { Text("🔍 Поиск ховерборда по названию или ID...") },
+                            label = { Text("🔍 Поиск ховерборда...") },
                             modifier = Modifier.fillMaxWidth()
                         )
                         Button(modifier = Modifier.fillMaxWidth(), onClick = {
                             ClassicCryptoAndSyncManager.unlockClassicBoards(null, null, ::log)
-                        }) { Text("🛹 Открыть ВСЕ доски и апгрейды в 1 клик") }
+                        }) { Text("🛹 Открыть ВСЕ доски в 1 клик") }
 
                         val filteredBoards = ClassicDatabase.CLASSIC_BOARDS.filter {
                             it.first.contains(classicSearchQuery, ignoreCase = true) ||
@@ -562,7 +550,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                         }
 
                         filteredBoards.forEach { (id, pair) ->
-                            val (name, upgrades) = pair
+                            val (name, _) = pair
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(10.dp),
@@ -571,25 +559,22 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                        Text("ID: $id \vert{} Способности: ${if (upgrades.isEmpty()) "Стандарт" else upgrades.joinToString()}", fontSize = 11.sp, color = Color.Gray)
+                                        Text("ID: $id", fontSize = 11.sp, color = Color.Gray)
                                     }
-                                    Button(onClick = {
-                                        ClassicCryptoAndSyncManager.unlockClassicBoards(id, id, ::log)
-                                    }) { Text("Открыть & Взять", fontSize = 11.sp) }
+                                    Button(onClick = { ClassicCryptoAndSyncManager.unlockClassicBoards(id, id, ::log) }) { Text("Открыть & Взять", fontSize = 11.sp) }
                                 }
                             }
                         }
                     }
 
-                    // Вкладка 4: Генератор Сундуков (Lootboxes) в очередь открытия
                     4 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🎁 Выдача Сундуков в очередь (lootboxQueue)", fontWeight = FontWeight.Bold)
+                                Text("🎁 Выдача Сундуков в очередь", fontWeight = FontWeight.Bold)
                                 OutlinedTextField(
                                     value = classicLootboxCount,
                                     onValueChange = { classicLootboxCount = it },
-                                    label = { Text("Количество боксов для выдачи") },
+                                    label = { Text("Количество боксов") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                     modifier = Modifier.fillMaxWidth()
                                 )
@@ -603,8 +588,8 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                     val map = classicCurrencies.mapValues { it.value.toLongOrNull() ?: 9999999L }
                                     val cnt = classicLootboxCount.toIntOrNull() ?: 20
                                     ClassicCryptoAndSyncManager.updateWalletAndInjectDonations(map, true, selectedClassicLootbox, cnt, ::log)
-                                    log("🎁 Добавлено $cnt шт. $selectedClassicLootbox прямо на главный экран игры!")
-                                }) { Text("🎁 Выдать выбранные сундуки") }
+                                    log("🎁 Выдано $cnt шт. $selectedClassicLootbox!")
+                                }) { Text("🎁 Выдать сундуки в очередь") }
                             }
                         }
                     }
