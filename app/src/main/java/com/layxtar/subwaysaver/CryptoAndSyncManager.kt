@@ -16,12 +16,18 @@ import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-object CryptoAndSyncManager {
-
-    const val PKG_CITY = "com.sybogames.subway.surfers.game"
+const val PKG_CITY = "com.sybogames.subway.surfers.game"
     const val PKG_CLASSIC = "com.kiloo.subwaysurf"
 
-    private const val GameProfilePath = "/storage/emulated/0/Android/data/$PKG_CITY/files/enc/profile"
+    // Добавь эти строки в начало объекта CryptoAndSyncManager:
+    const val CLASSIC_WALLET_PATH = "/storage/emulated/0/Android/data/$PKG_CLASSIC/files/profile/wallet.json"
+    const val CLASSIC_UPGRADES_PATH = "/storage/emulated/0/Android/data/$PKG_CLASSIC/files/profile/upgrades.json"
+
+    private val CITY_PATHS = listOf(
+        "/storage/emulated/0/Android/data/$PKG_CITY/files/enc/profile",
+        "/storage/emulated/0/Android/data/$PKG_CITY/files/enc",
+        "/storage/emulated/0/Android/data/$PKG_CITY/files/profile"
+    )
 
     fun checkShizukuPermission(log: (String) -> Unit): Boolean {
         if (!Shizuku.pingBinder()) {
