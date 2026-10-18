@@ -25,7 +25,6 @@ object CryptoAndSyncManager {
     )
 
     const val CLASSIC_WALLET_PATH = "/storage/emulated/0/Android/data/$PKG_CLASSIC/files/profile/wallet.json"
-    const val CLASSIC_UPGRADES_PATH = "/storage/emulated/0/Android/data/$PKG_CLASSIC/files/profile/upgrades.json"
 
     fun checkShizukuPermission(): Boolean {
         if (!Shizuku.pingBinder()) return false
@@ -37,7 +36,6 @@ object CryptoAndSyncManager {
         }
     }
 
-    // Безопасный запуск через рефлексию Shizuku с исправленными типами классов
     fun execSh(command: String): Pair<Int, String> {
         return try {
             val method = Shizuku::class.java.getDeclaredMethod(
@@ -82,7 +80,9 @@ object CryptoAndSyncManager {
         execSh("cp '$remotePath' '$remotePath.bak_editor'")
         val (code, _) = execSh("cat '${localTempFile.absolutePath}' > '$remotePath'")
         val parentDir = File(remotePath).parent
-        execSh("rm -f '$parentDir'/*.tmp '$parentDir'/*.temp")
+        if (parentDir != null) {
+            execSh("rm -f '$parentDir'/*.tmp '$parentDir'/*.temp")
+        }
         return code == 0
     }
 
@@ -427,40 +427,6 @@ object CryptoAndSyncManager {
             }
         }
         profile.put("missionProgresses", missions)
-    }
-
-    fun patchGameConfigsViaShizuku(cacheDir: File): String {
-        val (_, findOut) = execSh("find /storage/emulated/0/Android/data/$PKG_CITY -name 'manifest.json' 2>/dev/null | head -n 1")
-        val manifestPath = findOut.trim()
-        if (manifestPath.isEmpty()) {
-            return "Локальный кэш manifest.json не найден. Все фичи применены в профиль!"
-        }
-        val configDir = File(manifestPath).parent
-        val tempManifest = File(cacheDir, "manifest_tmp.json")
-        execSh("cat '$manifestPath' > '${tempManifest.absolutePath}'")
-        if (!tempManifest.exists()) return "Не удалось прочитать manifest.json"
-
-        val manifestJson = JSONObject(tempManifest.readText())
-        val objects = manifestJson.optJSONObject("objects") ?: return "Неверный формат manifest.json"
-
-        val ticketJson = """{"maxTicket":999,"regenerationCooldownInSeconds":1,"ticketCostPerPlay":0}"""
-        patchSingleConfig(cacheDir, configDir, objects, "campaignTicketingConfig", "campaignTicketingConfig.json", ticketJson)
-
-        val noAdsJson = """{"configurations":[{"countryTier":3,"minimumPlayerLevelToDisplayInterstitial":999,"rewardedVideoAdCooldown":0,"maximumCapacity":0,"coolDownBetweenInterstitials":999999,"minimumRunNumber":99999,"skipInterstitialIfRVInLastRun":true,"percentageFirstInterstitial":0,"percentageAfterFirstInterstitial":0}]}"""
-        patchSingleConfig(cacheDir, configDir, objects, "interstitials", "interstitials.json", noAdsJson)
-
-        tempManifest.writeText(manifestJson.toString())
-        execSh("cat '${tempManifest.absolutePath}' > '$manifestPath'")
-        return "✅ Конфиги пропатчены, SHA-1 ключи в manifest.json обновлены!"
-    }
-
-    private fun patchSingleConfig(cacheDir: File, configDir: String, objects: JSONObject, keyName: String, fileName: String, content: String) {
-        val bytes = content.toByteArray(Charsets.UTF_8)
-        val sha1 = MessageDigest.getInstance("SHA-1").digest(bytes).joinToString("") { "%02x".format(it) }
-        val tmpFile = File(cacheDir, fileName)
-        tmpFile.writeBytes(bytes)
-        execSh("cat '${tmpFile.absolutePath}' > '$configDir/$fileName'")
-        objects.optJSONObject(keyName)?.put("key", sha1)
     }
 
     private fun upsertCounter(counters: JSONArray, type: String, id: String, count: Int) {
