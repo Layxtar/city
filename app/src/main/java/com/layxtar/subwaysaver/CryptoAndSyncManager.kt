@@ -5,6 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.io.File
+import java.io.InputStream
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.time.Instant
@@ -37,11 +38,20 @@ object CryptoAndSyncManager {
         }
     }
 
+    // Безопасный запуск команд через Shizuku Binder без приватных ошибок компиляции
     fun execSh(command: String): Pair<Int, String> {
-        val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
-        val output = process.inputStream.bufferedReader().readText()
-        val code = process.waitFor()
-        return code to output
+        return try {
+            val binder = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
+            val inputStream = binder.inputStream
+            val output = inputStream.bufferedReader().readText()
+            val code = binder.waitFor()
+            code to output
+        } catch (e: Exception) {
+            // Запасной вариант через Runtime, если Shizuku-binder занят
+            val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val out = p.inputStream.bufferedReader().readText()
+            p.waitFor() to out
+        }
     }
 
     fun findCitySavePath(): String? {
@@ -150,8 +160,6 @@ object CryptoAndSyncManager {
         }
     }
 
-    // ==================== 1. ПЕРСОНАЖИ, ДОСКИ, СКИНЫ, КАМПАНИЯ ====================
-
     fun unlockAndMaxAllSurfers(profile: JSONObject, customHighScore: Long = 12500000L) {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
         val existingSkins = mutableMapOf<Long, Int>()
@@ -247,8 +255,6 @@ object CryptoAndSyncManager {
         profile.put("goals", goals)
     }
 
-    // ==================== 2. ИНЖЕКТОР ДОНАТА И ПЛАТНЫХ ПРОПУСКОВ ТРАСС ====================
-
     fun injectAllPaidPassesAndDonations(profile: JSONObject) {
         val purchaseHistory = profile.optJSONObject("purchaseHistory") ?: JSONObject()
         val nowIso = Instant.now().toString()
@@ -264,15 +270,12 @@ object CryptoAndSyncManager {
         profile.put("hasSeenPremiumPassActivation", true)
         profile.put("lifetimeMaxPurchasePrice", 99.99)
 
-        // Отключаем показ всех 57 надоедливых баннеров с предложением доната в главном меню
         val counters = profile.optJSONArray("counters") ?: JSONArray()
         for (notifId in GameDatabase.HOME_OFFER_NOTIFICATION_IDS) {
             upsertCounter(counters, "HomeOfferNotificationViewCounter", notifId, 999)
         }
         profile.put("counters", counters)
     }
-
-    // ==================== 3. РЕДАКТОР СВИНЬИ-КОПИЛКИ (PIGGY BANK) ====================
 
     fun configurePiggyBank(profile: JSONObject, piggyId: String, missionId: Long, progressAmount: Int, isFilled: Boolean) {
         profile.put("piggyBank", JSONObject().apply {
@@ -283,7 +286,6 @@ object CryptoAndSyncManager {
             put("isFilled", isFilled)
         })
 
-        // Обновляем миссию копилки в missionProgresses
         val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
         var found = false
         for (i in 0 until missions.length()) {
@@ -311,8 +313,6 @@ object CryptoAndSyncManager {
         profile.put("missionProgresses", missions)
     }
 
-    // ==================== 4. ДОПОЛНИТЕЛЬНЫЕ ТРАССЫ (WEEKLY WONDERS) И КВЕСТЫ ====================
-
     fun activateScheduledCampaign(profile: JSONObject, campaignId: String) {
         profile.put("activeScheduledCampaignProfile", JSONObject().apply {
             put("activeScheduledCampaignId", campaignId)
@@ -324,7 +324,6 @@ object CryptoAndSyncManager {
             })
         })
 
-        // Проходим все этапы выбранного еженедельного режима на 3 звезды
         val goals = profile.optJSONArray("goals") ?: JSONArray()
         for (stage in 1..7) {
             for (goal in 1..3) {
@@ -359,10 +358,7 @@ object CryptoAndSyncManager {
         profile.put("missionProgresses", missions)
     }
 
-    // ==================== 5. ВИТРИНА МАГАЗИНА, РУЛЕТКА, АЧИВКИ И ЗВЁЗДЫ ====================
-
     fun hackDailyDealsAndAdRewards(profile: JSONObject, dealRewardAmount: Int = 9999) {
-        // Ставим в 6 слотов магазина жирные награды (кредиты, ключи, жетоны, конфеты)
         val customTags = longArrayOf(-1878560402L, -1509662453L, -1085419483L, -635142441L, -2008679869L, 326719861L)
         val dealsArray = JSONArray()
         for (i in 0 until 6) {
@@ -375,7 +371,6 @@ object CryptoAndSyncManager {
         }
         profile.put("dailyDeal", JSONObject().put("dailyDeals", dealsArray))
 
-        // Ставим в 9 слотов ежедневной рекламной рулетки по 99 999 ресурсов
         val adRewards = JSONArray()
         val adTags = longArrayOf(-635142441L, -2008679869L, 326719861L, 1669706535L, -633437229L, -1085419483L, -1878560402L, 722065917L, -1509662453L)
         for (tag in adTags) {
@@ -399,7 +394,6 @@ object CryptoAndSyncManager {
         upsertCounter(counters, "PityCounter", "shop.box.ad.repeatable", 9)
         profile.put("counters", counters)
 
-        // Выполняем все 12 ачивок
         val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
         for ((achId, target) in GameDatabase.ACHIEVEMENT_MISSIONS) {
             var exists = false
@@ -427,13 +421,11 @@ object CryptoAndSyncManager {
         profile.put("missionProgresses", missions)
     }
 
-    // ==================== 6. ПАТЧЕР КОНФИГОВ ИГРЫ С АВТО-ХЭШЕМ SHA-1 ====================
-
     fun patchGameConfigsViaShizuku(cacheDir: File): String {
         val (_, findOut) = execSh("find /storage/emulated/0/Android/data/$PKG_CITY -name 'manifest.json' 2>/dev/null | head -n 1")
         val manifestPath = findOut.trim()
         if (manifestPath.isEmpty()) {
-            return "Локальный кэш manifest.json не найден (игра берёт конфиги из APK). Все фичи применены напрямую в профиль!"
+            return "Локальный кэш manifest.json не найден. Все фичи применены в профиль!"
         }
         val configDir = File(manifestPath).parent
         val tempManifest = File(cacheDir, "manifest_tmp.json")
@@ -443,17 +435,15 @@ object CryptoAndSyncManager {
         val manifestJson = JSONObject(tempManifest.readText())
         val objects = manifestJson.optJSONObject("objects") ?: return "Неверный формат manifest.json"
 
-        // 1. Патчим билеты кампании (0 цена игры, 999 макс билетов, 1 сек перезарядка)
         val ticketJson = """{"maxTicket":999,"regenerationCooldownInSeconds":1,"ticketCostPerPlay":0}"""
         patchSingleConfig(cacheDir, configDir, objects, "campaignTicketingConfig", "campaignTicketingConfig.json", ticketJson)
 
-        // 2. Патчим рекламу (минимальный уровень для показа = 999, шанс = 0%)
         val noAdsJson = """{"configurations":[{"countryTier":3,"minimumPlayerLevelToDisplayInterstitial":999,"rewardedVideoAdCooldown":0,"maximumCapacity":0,"coolDownBetweenInterstitials":999999,"minimumRunNumber":99999,"skipInterstitialIfRVInLastRun":true,"percentageFirstInterstitial":0,"percentageAfterFirstInterstitial":0}]}"""
         patchSingleConfig(cacheDir, configDir, objects, "interstitials", "interstitials.json", noAdsJson)
 
         tempManifest.writeText(manifestJson.toString())
         execSh("cat '${tempManifest.absolutePath}' > '$manifestPath'")
-        return "✅ Конфиги пропатчены, SHA-1 ключи в manifest.json пересчитаны!"
+        return "✅ Конфиги пропатчены, SHA-1 ключи в manifest.json обновлены!"
     }
 
     private fun patchSingleConfig(cacheDir: File, configDir: String, objects: JSONObject, keyName: String, fileName: String, content: String) {
