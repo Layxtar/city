@@ -15,7 +15,6 @@ object ClassicCryptoAndSyncManager {
     const val PKG_CLASSIC = "com.kiloo.subwaysurf"
     const val CLASSIC_PROFILE_DIR = "/storage/emulated/0/Android/data/$PKG_CLASSIC/files/profile"
 
-    // 32-байтовый ключ AES-256 для классического Subway Surfers
     private val CLASSIC_AES_KEY = byteArrayOf(
         57, 116, 107, 119, 86, 80, 102, 106,
         86, 114, 52, 52, 54, 82, 104, 51,
@@ -25,31 +24,22 @@ object ClassicCryptoAndSyncManager {
 
     private val ZERO_IV = ByteArray(16)
 
-        fun decryptClassicFile(rawBytes: ByteArray): JSONObject {
+    fun decryptClassicFile(rawBytes: ByteArray): JSONObject {
         val textAttempt = runCatching { String(rawBytes, Charsets.UTF_8).trim() }.getOrNull()
-        
-        // Если файл уже является валидным JSON (начинается с '{'), разбираем его напрямую
         if (textAttempt != null && textAttempt.startsWith("{")) {
             return try {
                 val outer = JSONObject(textAttempt)
-                // Если внутри есть зашифрованное/обернутое поле data в виде строки
                 if (outer.has("data") && outer.opt("data") is String) {
                     val innerStr = outer.getString("data")
-                    if (innerStr.startsWith("{")) {
-                        JSONObject(innerStr)
-                    } else {
-                        // Если data закодирована иначе или это просто строка-значение
-                        outer
-                    }
+                    if (innerStr.startsWith("{")) JSONObject(innerStr) else outer
                 } else {
                     outer
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 JSONObject()
             }
         }
 
-        // Если файл зашифрован через AES-CBC
         return try {
             if (rawBytes.size <= 24) return JSONObject()
             val cipherBytes = rawBytes.copyOfRange(24, rawBytes.size)
@@ -57,19 +47,9 @@ object ClassicCryptoAndSyncManager {
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(CLASSIC_AES_KEY, "AES"), IvParameterSpec(ZERO_IV))
             val decryptedBytes = cipher.doFinal(cipherBytes)
             JSONObject(String(decryptedBytes, Charsets.UTF_8))
-        } catch (e: Exception) {
-            // Фолбек на случай несовпадения формата, чтобы приложение не падало
+        } catch (_: Exception) {
             JSONObject()
         }
-    }
-
-
-        require(rawBytes.size > 24) { "Файл Classic слишком мал (${rawBytes.size} байт)" }
-        val cipherBytes = rawBytes.copyOfRange(24, rawBytes.size)
-        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(CLASSIC_AES_KEY, "AES"), IvParameterSpec(ZERO_IV))
-        val decryptedBytes = cipher.doFinal(cipherBytes)
-        return JSONObject(String(decryptedBytes, Charsets.UTF_8))
     }
 
     fun encryptClassicFile(originalBytes: ByteArray?, json: JSONObject): ByteArray {
@@ -107,7 +87,7 @@ object ClassicCryptoAndSyncManager {
             return try {
                 raw to decryptClassicFile(raw)
             } catch (e: Exception) {
-                log("⚠️ Ошибка дешифровки $fileName: ${e.message}, создаём чистый JSON")
+                log("⚠️ Ошибка дешифровки $fileName: ${e.message}")
                 raw to JSONObject()
             }
         }
@@ -180,20 +160,12 @@ object ClassicCryptoAndSyncManager {
         putScoreMod("permanent_score_multiplier", 5)
         putScoreMod("permanent_score_multiplier_3", 3)
         putScoreMod("permanent_score_multiplier_1", 1)
-        putScoreMod("permanent_score_multiplier_collection_revamp_1a", 1)
-        putScoreMod("permanent_score_multiplier_collection_revamp_1b", 1)
-        putScoreMod("permanent_score_multiplier_collection_revamp_1c", 1)
-        putScoreMod("permanent_score_multiplier_collection_revamp_1d", 1)
         upgrades.put("scoreModifiers", scoreMods)
 
         val pickupMods = upgrades.optJSONObject("currencyPickupModifiers") ?: JSONObject()
         pickupMods.put("doubleCoins", JSONObject().apply {
             put("value", JSONObject().put("id", "doubleCoins").put("type", 0).put("subType", 0).put("value", 2))
             put("expirationType", 0); put("contextType", 0); put("contextData", JSONObject())
-        })
-        pickupMods.put("token_multiplier_high", JSONObject().apply {
-            put("value", JSONObject().put("id", "token_multiplier_high").put("type", 0).put("subType", 2).put("value", 4))
-            put("expirationValue", 999999999999999L); put("expirationType", 1); put("contextType", 0); put("contextData", JSONObject())
         })
         upgrades.put("currencyPickupModifiers", pickupMods)
 
@@ -202,7 +174,7 @@ object ClassicCryptoAndSyncManager {
         })
 
         writeClassicJson("upgrades.json", raw, upgrades, log)
-        log("🪙 Двойные монеты, Умножитель жетонов x4 и все бустеры 6 ур. активированы!")
+        log("🪙 Двойные монеты и все бустеры 6 ур. активированы!")
     }
 
     fun unlockClassicSurfers(specificSurferId: String? = null, selectSurferId: String? = null, log: (String) -> Unit) {
@@ -236,7 +208,6 @@ object ClassicCryptoAndSyncManager {
             })
         }
         inv.put("owned", owned)
-
         if (selectSurferId != null) {
             inv.put("selected", JSONObject().put("character", selectSurferId).put("outfit", "default"))
         }
@@ -317,7 +288,7 @@ object ClassicCryptoAndSyncManager {
         ach.put("achievementEntries", entries)
         writeClassicJson("achievements.json", rawAch, ach, log)
 
-        log("🏆 Сезонная охота (40 тиров), 30 сетов миссий, все трофеи и ачивки разблокированы!")
+        log("🏆 Сезонная охота, миссии, трофеи и ачивки разблокированы!")
     }
 
     fun unlockAllPortraitsAndFrames(log: (String) -> Unit) {
@@ -343,6 +314,6 @@ object ClassicCryptoAndSyncManager {
         frameJson.put("owned", ownedFrames)
         writeClassicJson("profile_frame.json", rawFrame, frameJson, log)
 
-        log("🖼️ Все 114 портретов и 56 рамок профиля успешно открыты!")
+        log("🖼️ Портреты и рамки успешно открыты!")
     }
 }
