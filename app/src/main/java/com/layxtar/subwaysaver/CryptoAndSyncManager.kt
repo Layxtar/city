@@ -279,18 +279,26 @@ object CryptoAndSyncManager {
         }
     }
 
-    fun unlockAndMaxAllSurfers(profile: JSONObject, customHighScore: Long = 25000000L) {
+        // Открывает и прокачивает всех 27 сёрферов до 20 ур. БЕЗ накрутки их статистики забегов (сохраняет родной highScore)
+    fun unlockAndMaxAllSurfers(profile: JSONObject) {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
         val existingSkins = mutableMapOf<Long, Int>()
+        val existingScores = mutableMapOf<Long, Long>()
         for (i in 0 until currentArray.length()) {
             val obj = currentArray.getJSONObject(i)
-            existingSkins[obj.getLong("id")] = obj.optInt("selectedSkin", 0)
+            val sId = obj.getLong("id")
+            existingSkins[sId] = obj.optInt("selectedSkin", 0)
+            existingScores[sId] = obj.optLong("highScore", 0L)
         }
         val newArray = JSONArray()
         for ((id, _) in GameDatabase.SURFERS) {
             newArray.put(JSONObject().apply {
-                put("id", id); put("level", 20); put("isUnlocked", true); put("wasSeen", true)
-                put("highScore", customHighScore); put("selectedSkin", existingSkins[id] ?: 0)
+                put("id", id)
+                put("level", 20)
+                put("isUnlocked", true)
+                put("wasSeen", true)
+                put("highScore", existingScores[id] ?: 0L)
+                put("selectedSkin", existingSkins[id] ?: 0)
             })
         }
         profile.put("surferProfiles", newArray)
@@ -302,6 +310,16 @@ object CryptoAndSyncManager {
         }
         profile.put("counters", counters)
     }
+
+    // Отдельная функция (по желанию): установить кастомный рекорд всем сёрферам
+    fun setCustomHighScoreForAllSurfers(profile: JSONObject, customHighScore: Long) {
+        val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
+        for (i in 0 until currentArray.length()) {
+            currentArray.getJSONObject(i).put("highScore", customHighScore)
+        }
+        profile.put("surferProfiles", currentArray)
+    }
+
 
     fun unlockAndMaxAllBoards(profile: JSONObject) {
         val newArray = JSONArray()
