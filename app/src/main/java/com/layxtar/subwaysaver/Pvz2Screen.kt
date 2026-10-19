@@ -158,7 +158,6 @@ fun Pvz2Screen(
                                                     selectedPlantId = selectedPlantId,
                                                     seedAmount = 250,
                                                     unlockAllPlantsAndSkinsInShop = unlockAllPlantsInShop,
-                                                    injectCustomGodBundles = true,
                                                     log = log
                                                 )
                                             }
@@ -219,7 +218,6 @@ fun Pvz2Screen(
                                                     selectedPlantId = selectedPlantId,
                                                     seedAmount = seeds,
                                                     unlockAllPlantsAndSkinsInShop = false,
-                                                    injectCustomGodBundles = true,
                                                     log = log
                                                 )
                                             }
