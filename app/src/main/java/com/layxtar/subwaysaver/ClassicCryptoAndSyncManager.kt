@@ -3,9 +3,6 @@ package com.layxtar.subwaysaver
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.security.MessageDigest
 import java.time.Instant
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
@@ -16,190 +13,141 @@ object ClassicCryptoAndSyncManager {
     const val PKG_CLASSIC = "com.kiloo.subwaysurf"
     const val CLASSIC_PROFILE_DIR = "/storage/emulated/0/Android/data/$PKG_CLASSIC/files/profile"
 
-    // 32-байтовый ключ AES-256 для классического Subway Surfers
-    private val CLASSIC_AES_KEY = byteArrayOf(
-        57, 116, 107, 119, 86, 80, 102, 106,
-        86, 114, 52, 52, 54, 82, 104, 51,
-        119, 109, 117, 48, 115, 73, 74, 71,
-        89, 98, 99, 102, 53, 57, 48, 53
+    // Точный 32-байтовый ключ для СЕЙВОВ из твоего HTML-дешифратора!
+    private val SAVES_KEY_BYTES = byteArrayOf(
+        57, 114, 107, 120, 67, 80, 108, 106,
+        83, 77, 49, 71, 86, 81, 104, 87,
+        119, 49, 114, 49, 114, 75, 79, 72,
+        71, 99, 99, 98, 50, 105, 74, 53
     )
 
     private val ZERO_IV = ByteArray(16)
 
-    // Умный подбор смещения заголовка (20 байт SHA-1, 24 байта Length+SHA1, 8 байт и т.д.)
-    private fun decryptBinaryPayload(payload: ByteArray): JSONObject {
-        val candidateOffsets = listOf(20, 24, 8, 0, 4, 16, 28, 32)
-        for (offset in candidateOffsets) {
-            if (payload.size <= offset) continue
-            val remaining = payload.size - offset
-            if (remaining % 16 != 0) continue
+    // Стандартные версии обёртки {"version": X, "data": "..."} для файлов из папки profile
+    private val DEFAULT_FILE_VERSIONS = mapOf(
+        "wallet.json" to 3,
+        "user_stats.json" to 2,
+        "ad_placements.json" to 2,
+        "season_hunt.json" to 2,
+        "generic_challenges.json" to 2,
+        "boards_inventory.json" to 2,
+        "characters_inventory.json" to 3,
+        "upgrades.json" to 2,
+        "achievements.json" to 1,
+        "missions.json" to 1,
+        "trophies.json" to 1,
+        "profile_portrait.json" to 1,
+        "profile_frame.json" to 1
+    )
 
-            try {
-                val cipherBytes = payload.copyOfRange(offset, payload.size)
-                val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(CLASSIC_AES_KEY, "AES"), IvParameterSpec(ZERO_IV))
-                val decryptedBytes = cipher.doFinal(cipherBytes)
-                val text = String(decryptedBytes, Charsets.UTF_8).trim()
-                if (text.startsWith("{") && text.endsWith("}")) {
-                    return JSONObject(text)
-                }
-            } catch (_: Exception) {
-                // Пробуем следующее смещение
-            }
-        }
-
-        // Если ни одно стандартное смещение с PKCS5Padding не подошло, пробуем NoPadding и ищем '{'
-        for (offset in 0 until minOf(36, payload.size)) {
-            val remaining = (payload.size - offset) / 16 * 16
-            if (remaining <= 0) continue
-            try {
-                val cipherBytes = payload.copyOfRange(offset, offset + remaining)
-                val cipher = Cipher.getInstance("AES/CBC/NoPadding")
-                cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(CLASSIC_AES_KEY, "AES"), IvParameterSpec(ZERO_IV))
-                val dec = cipher.doFinal(cipherBytes)
-                // Убираем PKCS7 паддинг вручную, если он есть
-                val pad = dec.last().toInt() and 0xFF
-                val validLen = if (pad in 1..16) dec.size - pad else dec.size
-                if (validLen > 2) {
-                    val str = String(dec, 0, validLen, Charsets.UTF_8).trim()
-                    val firstBrace = str.indexOf('{')
-                    val lastBrace = str.lastIndexOf('}')
-                    if (firstBrace != -1 && lastBrace > firstBrace) {
-                        return JSONObject(str.substring(firstBrace, lastBrace + 1))
-                    }
-                }
-            } catch (_: Exception) { }
-        }
-
-        throw IllegalArgumentException("Не удалось подобрать смещение AES-CBC (размер payload: ${payload.size} байт)")
-    }
-
-    // Определяет, какой заголовок использовался в оригинальном payload (20 байт SHA-1 или 24 байта Length+SHA-1)
-    private fun encryptBinaryPayloadMatchingOriginal(originalPayload: ByteArray?, json: JSONObject): ByteArray {
-        val plainBytes = json.toString().toByteArray(Charsets.UTF_8)
+    // Расшифровка строки Base64 точь-в-точь как в функции decryptData(base64Data) из HTML
+    fun decryptBase64Data(base64Data: String): String {
+        val cleanB64 = base64Data.trim()
+        val encryptedBytes = Base64.decode(cleanB64, Base64.DEFAULT)
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(CLASSIC_AES_KEY, "AES"), IvParameterSpec(ZERO_IV))
+        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(SAVES_KEY_BYTES, "AES"), IvParameterSpec(ZERO_IV))
+        val decryptedBytes = cipher.doFinal(encryptedBytes)
+        return String(decryptedBytes, Charsets.UTF_8)
+    }
+
+    // Шифрование JSON-строки обратно в чистый Base64 (AES-CBC с нулевым IV)
+    fun encryptToBase64Data(plainJsonString: String): String {
+        val plainBytes = plainJsonString.toByteArray(Charsets.UTF_8)
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(SAVES_KEY_BYTES, "AES"), IvParameterSpec(ZERO_IV))
         val encryptedBytes = cipher.doFinal(plainBytes)
+        return Base64.encodeToString(encryptedBytes, Base64.NO_WRAP)
+    }
 
-        // Внутри {"version":3,"data":"..."} игра использует 20-байтовый SHA-1 от ОТКРЫТЫХ или ЗАШИФРОВАННЫХ данных,
-        // но при этом размер 376 байт = 20 байт SHA-1 + 356 (либо 8 байт + 368).
-        // Проверим, какое смещение было у оригинала:
-        val origOffset = if (originalPayload != null) {
-            listOf(20, 24, 8, 0, 4, 16).firstOrNull { off ->
-                originalPayload.size > off && (originalPayload.size - off) % 16 == 0 && runCatching {
-                    val c = Cipher.getInstance("AES/CBC/PKCS5Padding")
-                    c.init(Cipher.DECRYPT_MODE, SecretKeySpec(CLASSIC_AES_KEY, "AES"), IvParameterSpec(ZERO_IV))
-                    val s = String(c.doFinal(originalPayload.copyOfRange(off, originalPayload.size)), Charsets.UTF_8).trim()
-                    s.startsWith("{")
-                }.getOrDefault(false)
-            } ?: 20
-        } else 20
+    // Чтение файла: возвращает (версия_обёртки, расшифрованный_JSONObject)
+    fun readClassicJson(fileName: String, log: (String) -> Unit): Pair<Int, JSONObject> {
+        val defaultVer = DEFAULT_FILE_VERSIONS[fileName] ?: 1
+        val path = "$CLASSIC_PROFILE_DIR/$fileName"
+        val rawBytes = CryptoAndSyncManager.readFileViaShizuku(path, log)
 
-        val sha1 = MessageDigest.getInstance("SHA-1").digest(encryptedBytes)
+        if (rawBytes == null || rawBytes.isEmpty()) {
+            log("ℹ️ Файл $fileName не найден, будет создан с нуля (v$defaultVer)")
+            return defaultVer to createDefaultStructureForFile(fileName)
+        }
 
-        return when (origOffset) {
-            20 -> {
-                // 20 байт SHA-1 + зашифрованные данные (стандарт для поля "data" в wallet.json!)
-                ByteBuffer.allocate(20 + encryptedBytes.size)
-                    .put(sha1)
-                    .put(encryptedBytes)
-                    .array()
+        return try {
+            val fileText = String(rawBytes, Charsets.UTF_8).trim()
+            val outerJson = JSONObject(fileText)
+            val version = outerJson.optInt("version", defaultVer)
+
+            if (outerJson.has("data") && outerJson.opt("data") is String) {
+                val dataStr = outerJson.getString("data").trim()
+                val decryptedStr = if (dataStr.startsWith("{")) {
+                    dataStr
+                } else {
+                    decryptBase64Data(dataStr)
+                }
+                version to JSONObject(decryptedStr)
+            } else {
+                version to outerJson
             }
-            24 -> {
-                // 4 байта длина (20) + 20 байт SHA-1 + зашифрованные данные
-                val headerLen = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(20).array()
-                ByteBuffer.allocate(24 + encryptedBytes.size)
-                    .put(headerLen)
-                    .put(sha1)
-                    .put(encryptedBytes)
-                    .array()
-            }
-            8 -> {
-                // Копируем первые 8 байт заголовка из оригинала (если они были) + зашифрованные данные
-                val prefix = originalPayload?.copyOfRange(0, 8) ?: ByteArray(8)
-                ByteBuffer.allocate(8 + encryptedBytes.size)
-                    .put(prefix)
-                    .put(encryptedBytes)
-                    .array()
-            }
-            0 -> encryptedBytes
-            else -> {
-                ByteBuffer.allocate(20 + encryptedBytes.size)
-                    .put(sha1)
-                    .put(encryptedBytes)
-                    .array()
-            }
+        } catch (e: Exception) {
+            log("❌ Ошибка чтения $fileName: ${e.message}")
+            defaultVer to createDefaultStructureForFile(fileName)
         }
     }
 
-    // Универсальная расшифровка: читает {"version":3,"data":"Base64..."} из wallet.json[span_1](start_span)[span_1](end_span)
-    fun decryptClassicFile(rawBytes: ByteArray): JSONObject {
-        val textAttempt = runCatching { String(rawBytes, Charsets.UTF_8).trim() }.getOrNull()
-        if (textAttempt != null && textAttempt.startsWith("{")) {
-            val outer = JSONObject(textAttempt)
-            if (outer.has("data")) {
-                val dataObj = outer.opt("data")
-                if (dataObj is JSONObject) return dataObj
-                if (dataObj is String) {
-                    val dataStr = dataObj.trim()
-                    if (dataStr.startsWith("{")) {
-                        return JSONObject(dataStr)
-                    }
-                    val decodedPayload = Base64.decode(dataStr, Base64.DEFAULT)
-                    return decryptBinaryPayload(decodedPayload)
+    // Запись файла: упаковывает в {"version":X,"data":"<Base64>"}
+    fun writeClassicJson(fileName: String, version: Int, innerJson: JSONObject, log: (String) -> Unit): Boolean {
+        val path = "$CLASSIC_PROFILE_DIR/$fileName"
+        return try {
+            innerJson.put("lastSaved", Instant.now().toString())
+            val encryptedB64 = encryptToBase64Data(innerJson.toString())
+            val wrapper = JSONObject()
+                .put("version", version)
+                .put("data", encryptedB64)
+
+            val outBytes = wrapper.toString().toByteArray(Charsets.UTF_8)
+            val ok = CryptoAndSyncManager.writeFileViaShizuku(path, outBytes, log)
+            if (ok) log("✅ Успешно записан $fileName (v$version)")
+            ok
+        } catch (e: Exception) {
+            log("❌ Ошибка шифрования $fileName: ${e.message}")
+            false
+        }
+    }
+
+    // Базовый шаблон на случай, если какого-то файла ещё нет в папке profile
+    private fun createDefaultStructureForFile(fileName: String): JSONObject {
+        return JSONObject().apply {
+            put("lastSaved", Instant.now().toString())
+            when (fileName) {
+                "wallet.json" -> {
+                    put("currencies", JSONObject())
+                    put("lootboxQueue", JSONObject().put("unopenedLootboxes", JSONArray()))
+                    put("currencyAllowedInRun", JSONObject().put("4", true).put("5", true))
+                    put("lootBoxesOpened", JSONObject())
+                    put("LootTableInjectedEntryOverrides", JSONObject())
+                    put("ownedOnlyBuyOnceProducts", JSONArray())
+                    put("productPurchaseTimeData", JSONObject())
+                    put("crewCapClaimsPerSource", JSONObject())
+                }
+                "upgrades.json" -> {
+                    put("patchVersion", 2)
+                    put("scoreModifiers", JSONObject())
+                    put("currencyPickupModifiers", JSONObject())
+                    put("powerupLevels", JSONObject())
+                }
+                "characters_inventory.json" -> {
+                    put("patchVersion", 3)
+                    put("selected", JSONObject().put("character", "jake").put("outfit", "default"))
+                    put("owned", JSONObject())
+                }
+                "boards_inventory.json" -> {
+                    put("patchVersion", 2)
+                    put("selected", "default")
+                    put("owned", JSONObject())
                 }
             }
-            return outer
         }
-        return decryptBinaryPayload(rawBytes)
     }
 
-    // Универсальное шифрование: упаковывает обратно в {"version":3,"data":"Base64..."}[span_2](start_span)[span_2](end_span)
-    fun encryptClassicFile(originalBytes: ByteArray?, json: JSONObject): ByteArray {
-        json.put("lastSaved", Instant.now().toString())
-
-        val textAttempt = originalBytes?.let { runCatching { String(it, Charsets.UTF_8).trim() }.getOrNull() }
-        if (textAttempt != null && textAttempt.startsWith("{")) {
-            val outer = JSONObject(textAttempt)
-            if (outer.has("data")) {
-                val oldDataStr = outer.optString("data", "").trim()
-                val origPayload = if (oldDataStr.isNotEmpty() && !oldDataStr.startsWith("{")) {
-                    runCatching { Base64.decode(oldDataStr, Base64.DEFAULT) }.getOrNull()
-                } else null
-
-                val encryptedPayload = encryptBinaryPayloadMatchingOriginal(origPayload, json)
-                val b64 = Base64.encodeToString(encryptedPayload, Base64.NO_WRAP)
-                outer.put("data", b64)
-                return outer.toString().toByteArray(Charsets.UTF_8)
-            }
-        }
-
-        val encryptedPayload = encryptBinaryPayloadMatchingOriginal(originalBytes, json)
-        val b64 = Base64.encodeToString(encryptedPayload, Base64.NO_WRAP)
-        val wrapper = JSONObject().put("version", 3).put("data", b64)
-        return wrapper.toString().toByteArray(Charsets.UTF_8)
-    }
-
-    fun readClassicJson(fileName: String, log: (String) -> Unit): Pair<ByteArray?, JSONObject> {
-        val path = "$CLASSIC_PROFILE_DIR/$fileName"
-        val raw = CryptoAndSyncManager.readFileViaShizuku(path, log)
-        if (raw != null) {
-            return try {
-                raw to decryptClassicFile(raw)
-            } catch (e: Exception) {
-                log("⚠️ Ошибка дешифровки $fileName: ${e.message}")
-                raw to JSONObject()
-            }
-        }
-        return null to JSONObject()
-    }
-
-    fun writeClassicJson(fileName: String, originalRaw: ByteArray?, json: JSONObject, log: (String) -> Unit): Boolean {
-        val path = "$CLASSIC_PROFILE_DIR/$fileName"
-        val outBytes = encryptClassicFile(originalRaw, json)
-        return CryptoAndSyncManager.writeFileViaShizuku(path, outBytes, log)
-    }
-
+    // 1. Обновление wallet.json (создаёт любую отсутствующую валюту с нуля!)
     fun updateWalletAndInjectDonations(
         currencyMap: Map<String, Long>,
         unlockAllBuyOnce: Boolean,
@@ -208,16 +156,32 @@ object ClassicCryptoAndSyncManager {
         log: (String) -> Unit
     ) {
         CryptoAndSyncManager.stopGameForSync(PKG_CLASSIC, true, log)
-        val (raw, wallet) = readClassicJson("wallet.json", log)
+        val (ver, wallet) = readClassicJson("wallet.json", log)
         val currencies = wallet.optJSONObject("currencies") ?: JSONObject()
 
         for ((id, amount) in currencyMap) {
-            val cObj = currencies.optJSONObject(id) ?: JSONObject()
-            cObj.put("value", amount)
-            if (!cObj.has("expirationType")) cObj.put("expirationType", 0)
-            if (!cObj.has("contextType")) cObj.put("contextType", 0)
-            if (!cObj.has("contextData")) cObj.put("contextData", JSONObject())
-            currencies.put(id, cObj)
+            // Если строчки с этой валютой нет в wallet.json — создаём её с нуля!
+            val existingObj = currencies.optJSONObject(id)
+            if (existingObj != null) {
+                existingObj.put("value", amount)
+                if (!existingObj.has("expirationType")) existingObj.put("expirationType", 0)
+                if (!existingObj.has("contextType")) existingObj.put("contextType", 0)
+                if (!existingObj.has("contextData")) existingObj.put("contextData", JSONObject())
+            } else {
+                val newCurrencyEntry = JSONObject().apply {
+                    put("value", amount)
+                    if (id == "6") {
+                        // Для сезонных монет (EventCoins, id = 6) ставим срок действия до конца сезона
+                        put("expirationValue", 1793577599999L)
+                        put("expirationType", 1)
+                    } else {
+                        put("expirationType", 0)
+                    }
+                    put("contextType", 0)
+                    put("contextData", JSONObject())
+                }
+                currencies.put(id, newCurrencyEntry)
+            }
         }
         wallet.put("currencies", currencies)
         wallet.put("currencyAllowedInRun", JSONObject().put("4", true).put("5", true))
@@ -242,12 +206,13 @@ object ClassicCryptoAndSyncManager {
             wallet.put("lootboxQueue", queueObj)
         }
 
-        writeClassicJson("wallet.json", raw, wallet, log)
+        writeClassicJson("wallet.json", ver, wallet, log)
     }
 
+    // 2. Двойные монеты, множители и бустеры 6 ур. -> upgrades.json
     fun unlockDoubleCoinsAndMaxUpgrades(log: (String) -> Unit) {
         CryptoAndSyncManager.stopGameForSync(PKG_CLASSIC, true, log)
-        val (raw, upgrades) = readClassicJson("upgrades.json", log)
+        val (ver, upgrades) = readClassicJson("upgrades.json", log)
         upgrades.put("patchVersion", 2)
 
         val scoreMods = upgrades.optJSONObject("scoreModifiers") ?: JSONObject()
@@ -260,10 +225,6 @@ object ClassicCryptoAndSyncManager {
         putScoreMod("permanent_score_multiplier", 5)
         putScoreMod("permanent_score_multiplier_3", 3)
         putScoreMod("permanent_score_multiplier_1", 1)
-        putScoreMod("permanent_score_multiplier_collection_revamp_1a", 1)
-        putScoreMod("permanent_score_multiplier_collection_revamp_1b", 1)
-        putScoreMod("permanent_score_multiplier_collection_revamp_1c", 1)
-        putScoreMod("permanent_score_multiplier_collection_revamp_1d", 1)
         upgrades.put("scoreModifiers", scoreMods)
 
         val pickupMods = upgrades.optJSONObject("currencyPickupModifiers") ?: JSONObject()
@@ -271,8 +232,12 @@ object ClassicCryptoAndSyncManager {
             put("value", JSONObject().put("id", "doubleCoins").put("type", 0).put("subType", 0).put("value", 2))
             put("expirationType", 0); put("contextType", 0); put("contextData", JSONObject())
         })
-        pickupMods.put("token_multiplier_high", JSONObject().apply {
-            put("value", JSONObject().put("id", "token_multiplier_high").put("type", 0).put("subType", 2).put("value", 4))
+        pickupMods.put("permanent_score_multiplier", JSONObject().apply {
+            put("value", JSONObject().put("id", "permanent_score_multiplier").put("type", 2).put("subType", 3).put("value", 5))
+            put("expirationValue", 999999999999999L); put("expirationType", 1); put("contextType", 0); put("contextData", JSONObject())
+        })
+        pickupMods.put("token_multiplier_low", JSONObject().apply {
+            put("value", JSONObject().put("id", "token_multiplier_low").put("type", 0).put("subType", 2).put("value", 2))
             put("expirationValue", 999999999999999L); put("expirationType", 1); put("contextType", 0); put("contextData", JSONObject())
         })
         upgrades.put("currencyPickupModifiers", pickupMods)
@@ -281,13 +246,14 @@ object ClassicCryptoAndSyncManager {
             put("jetpack", 6); put("superSneakers", 6); put("magnet", 6); put("doubleScore", 6)
         })
 
-        writeClassicJson("upgrades.json", raw, upgrades, log)
-        log("🪙 Двойные монеты, Умножитель жетонов x4 и все бустеры 6 ур. активированы!")
+        writeClassicJson("upgrades.json", ver, upgrades, log)
+        log("🪙 upgrades.json: Двойные монеты, множитель и бустеры 6 ур. включены!")
     }
 
+    // 3. Разблокировка сёрферов -> characters_inventory.json
     fun unlockClassicSurfers(specificSurferId: String? = null, selectSurferId: String? = null, log: (String) -> Unit) {
         CryptoAndSyncManager.stopGameForSync(PKG_CLASSIC, true, log)
-        val (raw, inv) = readClassicJson("characters_inventory.json", log)
+        val (ver, inv) = readClassicJson("characters_inventory.json", log)
         inv.put("patchVersion", 3)
         val owned = inv.optJSONObject("owned") ?: JSONObject()
 
@@ -321,13 +287,13 @@ object ClassicCryptoAndSyncManager {
             inv.put("selected", JSONObject().put("character", selectSurferId).put("outfit", "default"))
         }
 
-        writeClassicJson("characters_inventory.json", raw, inv, log)
-        log("✅ Сёрферы Classic успешно обновлены!")
+        writeClassicJson("characters_inventory.json", ver, inv, log)
     }
 
+    // 4. Разблокировка досок -> boards_inventory.json
     fun unlockClassicBoards(specificBoardId: String? = null, selectBoardId: String? = null, log: (String) -> Unit) {
         CryptoAndSyncManager.stopGameForSync(PKG_CLASSIC, true, log)
-        val (raw, inv) = readClassicJson("boards_inventory.json", log)
+        val (ver, inv) = readClassicJson("boards_inventory.json", log)
         inv.put("patchVersion", 2)
         val owned = inv.optJSONObject("owned") ?: JSONObject()
 
@@ -346,14 +312,14 @@ object ClassicCryptoAndSyncManager {
         inv.put("owned", owned)
         if (selectBoardId != null) inv.put("selected", selectBoardId)
 
-        writeClassicJson("boards_inventory.json", raw, inv, log)
-        log("✅ Ховерборды Classic успешно обновлены!")
+        writeClassicJson("boards_inventory.json", ver, inv, log)
     }
 
+    // 5. Сезонная охота, Миссии, Трофеи и Ачивки -> season_hunt.json, missions.json, trophies.json, achievements.json
     fun maxSeasonHuntMissionsAndAchievements(log: (String) -> Unit) {
         CryptoAndSyncManager.stopGameForSync(PKG_CLASSIC, true, log)
 
-        val (rawSh, sh) = readClassicJson("season_hunt.json", log)
+        val (verSh, sh) = readClassicJson("season_hunt.json", log)
         sh.put("collectedTokens", 99999)
         val tiersArr = JSONArray()
         for (idx in 0..40) {
@@ -363,22 +329,22 @@ object ClassicCryptoAndSyncManager {
         }
         sh.put("rewardsThisSeason", tiersArr)
         sh.put("lastUnlockedTierSeen", 40)
-        writeClassicJson("season_hunt.json", rawSh, sh, log)
+        writeClassicJson("season_hunt.json", verSh, sh, log)
 
-        val (rawMis, mis) = readClassicJson("missions.json", log)
+        val (verMis, mis) = readClassicJson("missions.json", log)
         mis.put("patchVersion", 1)
         mis.put("currentMissionSet", 31)
         mis.put("claimedMissionSet", 30)
-        writeClassicJson("missions.json", rawMis, mis, log)
+        writeClassicJson("missions.json", verMis, mis, log)
 
-        val (rawTr, tr) = readClassicJson("trophies.json", log)
+        val (verTr, tr) = readClassicJson("trophies.json", log)
         val trArr = JSONArray()
         ClassicDatabase.ALL_TROPHIES.forEach { trArr.put(it) }
         tr.put("trophiesEarned", trArr)
         tr.put("trophyCompletions", JSONObject().put("TrophySet1", 4).put("TrophySet2", 4))
-        writeClassicJson("trophies.json", rawTr, tr, log)
+        writeClassicJson("trophies.json", verTr, tr, log)
 
-        val (rawAch, ach) = readClassicJson("achievements.json", log)
+        val (verAch, ach) = readClassicJson("achievements.json", log)
         val entries = ach.optJSONObject("achievementEntries") ?: JSONObject()
         val keys = entries.keys()
         while (keys.hasNext()) {
@@ -395,15 +361,14 @@ object ClassicCryptoAndSyncManager {
             entry.put("markAsViewed", true)
         }
         ach.put("achievementEntries", entries)
-        writeClassicJson("achievements.json", rawAch, ach, log)
-
-        log("🏆 Сезонная охота (40 тиров), 30 сетов миссий, все трофеи и ачивки разблокированы!")
+        writeClassicJson("achievements.json", verAch, ach, log)
     }
 
+    // 6. Портреты и Рамки -> profile_portrait.json, profile_frame.json
     fun unlockAllPortraitsAndFrames(log: (String) -> Unit) {
         CryptoAndSyncManager.stopGameForSync(PKG_CLASSIC, true, log)
 
-        val (rawPort, portJson) = readClassicJson("profile_portrait.json", log)
+        val (verPort, portJson) = readClassicJson("profile_portrait.json", log)
         portJson.put("patchVersion", 1)
         if (!portJson.has("selected")) portJson.put("selected", "countcorvin_illustration_portrait")
         val ownedPortraits = portJson.optJSONObject("owned") ?: JSONObject()
@@ -411,9 +376,9 @@ object ClassicCryptoAndSyncManager {
             ownedPortraits.put(pId, JSONObject().put("id", pId).put("isSeen", true))
         }
         portJson.put("owned", ownedPortraits)
-        writeClassicJson("profile_portrait.json", rawPort, portJson, log)
+        writeClassicJson("profile_portrait.json", verPort, portJson, log)
 
-        val (rawFrame, frameJson) = readClassicJson("profile_frame.json", log)
+        val (verFrame, frameJson) = readClassicJson("profile_frame.json", log)
         frameJson.put("patchVersion", 1)
         if (!frameJson.has("selected")) frameJson.put("selected", "collection_revamp_15_frame")
         val ownedFrames = frameJson.optJSONObject("owned") ?: JSONObject()
@@ -421,11 +386,10 @@ object ClassicCryptoAndSyncManager {
             ownedFrames.put(fId, JSONObject().put("id", fId).put("isSeen", true))
         }
         frameJson.put("owned", ownedFrames)
-        writeClassicJson("profile_frame.json", rawFrame, frameJson, log)
-
-        log("🖼️ Все 114 портретов и 56 рамок профиля успешно открыты!")
+        writeClassicJson("profile_frame.json", verFrame, frameJson, log)
     }
 
+    // 7. Выбор Трассы (Города) для забегов -> generic_challenges.json и user_stats.json
     fun setClassicEventCityAndUnlockStages(
         targetCityId: String,
         completeAllStages: Boolean,
@@ -434,7 +398,7 @@ object ClassicCryptoAndSyncManager {
     ) {
         CryptoAndSyncManager.stopGameForSync(PKG_CLASSIC, true, log)
 
-        val (rawGc, gc) = readClassicJson("generic_challenges.json", log)
+        val (verGc, gc) = readClassicJson("generic_challenges.json", log)
         val states = gc.optJSONObject("challengeStates") ?: JSONObject()
         val keys = states.keys()
         while (keys.hasNext()) {
@@ -467,16 +431,16 @@ object ClassicCryptoAndSyncManager {
             }
         }
         gc.put("challengeStates", states)
-        writeClassicJson("generic_challenges.json", rawGc, gc, log)
+        writeClassicJson("generic_challenges.json", verGc, gc, log)
 
         if (targetCityId.isNotBlank()) {
-            val (rawSt, st) = readClassicJson("user_stats.json", log)
+            val (verSt, st) = readClassicJson("user_stats.json", log)
             val visited = st.optJSONObject("worldDestinationVisited") ?: JSONObject()
             visited.put(targetCityId, maxOf(visited.optInt(targetCityId, 0), 10))
             st.put("worldDestinationVisited", visited)
-            writeClassicJson("user_stats.json", rawSt, st, log)
+            writeClassicJson("user_stats.json", verSt, st, log)
         }
 
-        log("🌍 Трасса '$targetCityId' установлена во все режимы забегов Classic!")
+        log("🌍 Трасса '$targetCityId' успешно записана в generic_challenges.json!")
     }
 }
