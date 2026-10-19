@@ -1,5 +1,6 @@
 package com.layxtar.subwaysaver
 
+import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteBuffer
@@ -15,6 +16,7 @@ object ClassicCryptoAndSyncManager {
     const val PKG_CLASSIC = "com.kiloo.subwaysurf"
     const val CLASSIC_PROFILE_DIR = "/storage/emulated/0/Android/data/$PKG_CLASSIC/files/profile"
 
+    // 32-байтовый ключ AES-256 для классического Subway Surfers
     private val CLASSIC_AES_KEY = byteArrayOf(
         57, 116, 107, 119, 86, 80, 102, 106,
         86, 114, 52, 52, 54, 82, 104, 51,
@@ -24,47 +26,17 @@ object ClassicCryptoAndSyncManager {
 
     private val ZERO_IV = ByteArray(16)
 
-    fun decryptClassicFile(rawBytes: ByteArray): JSONObject {
-        val textAttempt = runCatching { String(rawBytes, Charsets.UTF_8).trim() }.getOrNull()
-        if (textAttempt != null && textAttempt.startsWith("{")) {
-            return try {
-                val outer = JSONObject(textAttempt)
-                if (outer.has("data") && outer.opt("data") is String) {
-                    val innerStr = outer.getString("data")
-                    if (innerStr.startsWith("{")) JSONObject(innerStr) else outer
-                } else {
-                    outer
-                }
-            } catch (_: Exception) {
-                JSONObject()
-            }
-        }
-
-        return try {
-            if (rawBytes.size <= 24) return JSONObject()
-            val cipherBytes = rawBytes.copyOfRange(24, rawBytes.size)
-            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(CLASSIC_AES_KEY, "AES"), IvParameterSpec(ZERO_IV))
-            val decryptedBytes = cipher.doFinal(cipherBytes)
-            JSONObject(String(decryptedBytes, Charsets.UTF_8))
-        } catch (_: Exception) {
-            JSONObject()
-        }
+    private fun decryptBinaryPayload(payload: ByteArray): JSONObject {
+        require(payload.size > 24) { "Payload слишком мал (${payload.size} байт)" }
+        // Пробуем стандартный отступ 24 байта (4 байта длина хеша + 20 байт SHA-1)
+        val cipherBytes = payload.copyOfRange(24, payload.size)
+        val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(CLASSIC_AES_KEY, "AES"), IvParameterSpec(ZERO_IV))
+        val decryptedBytes = cipher.doFinal(cipherBytes)
+        return JSONObject(String(decryptedBytes, Charsets.UTF_8))
     }
 
-    fun encryptClassicFile(originalBytes: ByteArray?, json: JSONObject): ByteArray {
-        json.put("lastSaved", Instant.now().toString())
-
-        val textAttempt = originalBytes?.let { runCatching { String(it, Charsets.UTF_8).trim() }.getOrNull() }
-        if (textAttempt != null && textAttempt.startsWith("{")) {
-            val outer = JSONObject(textAttempt)
-            if (outer.has("data") && outer.opt("data") is String) {
-                outer.put("data", json.toString())
-                return outer.toString().toByteArray(Charsets.UTF_8)
-            }
-            return json.toString(2).toByteArray(Charsets.UTF_8)
-        }
-
+    private fun encryptBinaryPayload(json: JSONObject): ByteArray {
         val plainBytes = json.toString().toByteArray(Charsets.UTF_8)
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(CLASSIC_AES_KEY, "AES"), IvParameterSpec(ZERO_IV))
@@ -80,6 +52,52 @@ object ClassicCryptoAndSyncManager {
             .array()
     }
 
+    // Универсальная расшифровка: понимает и JSON-обёртку {"version":3,"data":"Base64..."}, и чистый бинарник
+    fun decryptClassicFile(rawBytes: ByteArray): JSONObject {
+        val textAttempt = runCatching { String(rawBytes, Charsets.UTF_8).trim() }.getOrNull()
+        if (textAttempt != null && textAttempt.startsWith("{")) {
+            val outer = JSONObject(textAttempt)
+            if (outer.has("data") && outer.opt("data") is String) {
+                val dataStr = outer.getString("data").trim()
+                if (dataStr.startsWith("{")) {
+                    return JSONObject(dataStr)
+                }
+                // Расшифровываем Base64 внутри поля "data"
+                val decodedPayload = Base64.decode(dataStr, Base64.DEFAULT)
+                return decryptBinaryPayload(decodedPayload)
+            }
+            return outer
+        }
+        return decryptBinaryPayload(rawBytes)
+    }
+
+    // Универсальное шифрование: сохраняет оригинальную структуру файла игры
+    fun encryptClassicFile(originalBytes: ByteArray?, json: JSONObject): ByteArray {
+        json.put("lastSaved", Instant.now().toString())
+
+        val textAttempt = originalBytes?.let { runCatching { String(it, Charsets.UTF_8).trim() }.getOrNull() }
+        if (textAttempt != null && textAttempt.startsWith("{")) {
+            val outer = JSONObject(textAttempt)
+            if (outer.has("data")) {
+                val oldData = outer.optString("data", "").trim()
+                if (oldData.startsWith("{")) {
+                    outer.put("data", json.toString())
+                } else {
+                    val encryptedPayload = encryptBinaryPayload(json)
+                    val b64 = Base64.encodeToString(encryptedPayload, Base64.NO_WRAP)
+                    outer.put("data", b64)
+                }
+                return outer.toString().toByteArray(Charsets.UTF_8)
+            }
+        }
+
+        // По умолчанию в современном Classic Subway Surfers используется обёртка {"version":3,"data":"Base64"}
+        val encryptedPayload = encryptBinaryPayload(json)
+        val b64 = Base64.encodeToString(encryptedPayload, Base64.NO_WRAP)
+        val wrapper = JSONObject().put("version", 3).put("data", b64)
+        return wrapper.toString().toByteArray(Charsets.UTF_8)
+    }
+
     fun readClassicJson(fileName: String, log: (String) -> Unit): Pair<ByteArray?, JSONObject> {
         val path = "$CLASSIC_PROFILE_DIR/$fileName"
         val raw = CryptoAndSyncManager.readFileViaShizuku(path, log)
@@ -87,7 +105,7 @@ object ClassicCryptoAndSyncManager {
             return try {
                 raw to decryptClassicFile(raw)
             } catch (e: Exception) {
-                log("⚠️ Ошибка дешифровки $fileName: ${e.message}")
+                log("⚠️ Ошибка чтения $fileName: ${e.message}")
                 raw to JSONObject()
             }
         }
@@ -114,8 +132,8 @@ object ClassicCryptoAndSyncManager {
         for ((id, amount) in currencyMap) {
             val cObj = currencies.optJSONObject(id) ?: JSONObject()
             cObj.put("value", amount)
-            cObj.put("expirationType", 0)
-            cObj.put("contextType", 0)
+            if (!cObj.has("expirationType")) cObj.put("expirationType", 0)
+            if (!cObj.has("contextType")) cObj.put("contextType", 0)
             if (!cObj.has("contextData")) cObj.put("contextData", JSONObject())
             currencies.put(id, cObj)
         }
@@ -160,12 +178,20 @@ object ClassicCryptoAndSyncManager {
         putScoreMod("permanent_score_multiplier", 5)
         putScoreMod("permanent_score_multiplier_3", 3)
         putScoreMod("permanent_score_multiplier_1", 1)
+        putScoreMod("permanent_score_multiplier_collection_revamp_1a", 1)
+        putScoreMod("permanent_score_multiplier_collection_revamp_1b", 1)
+        putScoreMod("permanent_score_multiplier_collection_revamp_1c", 1)
+        putScoreMod("permanent_score_multiplier_collection_revamp_1d", 1)
         upgrades.put("scoreModifiers", scoreMods)
 
         val pickupMods = upgrades.optJSONObject("currencyPickupModifiers") ?: JSONObject()
         pickupMods.put("doubleCoins", JSONObject().apply {
             put("value", JSONObject().put("id", "doubleCoins").put("type", 0).put("subType", 0).put("value", 2))
             put("expirationType", 0); put("contextType", 0); put("contextData", JSONObject())
+        })
+        pickupMods.put("token_multiplier_high", JSONObject().apply {
+            put("value", JSONObject().put("id", "token_multiplier_high").put("type", 0).put("subType", 2).put("value", 4))
+            put("expirationValue", 999999999999999L); put("expirationType", 1); put("contextType", 0); put("contextData", JSONObject())
         })
         upgrades.put("currencyPickupModifiers", pickupMods)
 
@@ -174,7 +200,7 @@ object ClassicCryptoAndSyncManager {
         })
 
         writeClassicJson("upgrades.json", raw, upgrades, log)
-        log("🪙 Двойные монеты и все бустеры 6 ур. активированы!")
+        log("🪙 Двойные монеты, Умножитель жетонов x4 и все бустеры 6 ур. активированы!")
     }
 
     fun unlockClassicSurfers(specificSurferId: String? = null, selectSurferId: String? = null, log: (String) -> Unit) {
@@ -208,6 +234,7 @@ object ClassicCryptoAndSyncManager {
             })
         }
         inv.put("owned", owned)
+
         if (selectSurferId != null) {
             inv.put("selected", JSONObject().put("character", selectSurferId).put("outfit", "default"))
         }
@@ -288,7 +315,7 @@ object ClassicCryptoAndSyncManager {
         ach.put("achievementEntries", entries)
         writeClassicJson("achievements.json", rawAch, ach, log)
 
-        log("🏆 Сезонная охота, миссии, трофеи и ачивки разблокированы!")
+        log("🏆 Сезонная охота (40 тиров), 30 сетов миссий, все трофеи и ачивки разблокированы!")
     }
 
     fun unlockAllPortraitsAndFrames(log: (String) -> Unit) {
@@ -314,6 +341,62 @@ object ClassicCryptoAndSyncManager {
         frameJson.put("owned", ownedFrames)
         writeClassicJson("profile_frame.json", rawFrame, frameJson, log)
 
-        log("🖼️ Портреты и рамки успешно открыты!")
+        log("🖼️ Все 114 портретов и 56 рамок профиля успешно открыты!")
+    }
+
+    // Выбор любой трассы (Города) для ивентовых забегов Classic + снятие таймеров и закрытие этапов
+    fun setClassicEventCityAndUnlockStages(
+        targetCityId: String,
+        completeAllStages: Boolean,
+        clearCooldowns: Boolean,
+        log: (String) -> Unit
+    ) {
+        CryptoAndSyncManager.stopGameForSync(PKG_CLASSIC, true, log)
+
+        val (rawGc, gc) = readClassicJson("generic_challenges.json", log)
+        val states = gc.optJSONObject("challengeStates") ?: JSONObject()
+        val keys = states.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val ch = states.getJSONObject(key)
+            if (targetCityId.isNotBlank() && ch.has("targetCity")) {
+                ch.put("targetCity", targetCityId)
+                val reqs = ch.optJSONObject("requirements")
+                val progData = reqs?.optJSONObject("progress")?.optJSONArray("data")
+                if (progData != null) {
+                    for (i in 0 until progData.length()) {
+                        val d = progData.getJSONObject(i)
+                        if (d.optString("type") == "City") d.put("value", targetCityId)
+                    }
+                }
+            }
+            if (clearCooldowns) {
+                ch.optJSONObject("requirements")?.put("cooldownItems", JSONObject())
+            }
+            if (completeAllStages) {
+                ch.put("currentScore", 5000000)
+                ch.put("highScore", 5000000)
+                ch.put("lastSeenScore", 5000000)
+                val rStates = ch.optJSONArray("rewardStates") ?: JSONArray()
+                for (i in 0 until rStates.length()) {
+                    val rs = rStates.getJSONObject(i)
+                    if (rs.optInt("State", 0) == 0) rs.put("State", 1) // 1 = Готово к сбору
+                    rs.put("AdRequired", false)
+                }
+            }
+        }
+        gc.put("challengeStates", states)
+        writeClassicJson("generic_challenges.json", rawGc, gc, log)
+
+        // Также записываем город в посещённые локации (user_stats.json)
+        if (targetCityId.isNotBlank()) {
+            val (rawSt, st) = readClassicJson("user_stats.json", log)
+            val visited = st.optJSONObject("worldDestinationVisited") ?: JSONObject()
+            visited.put(targetCityId, maxOf(visited.optInt(targetCityId, 0), 10))
+            st.put("worldDestinationVisited", visited)
+            writeClassicJson("user_stats.json", rawSt, st, log)
+        }
+
+        log("🌍 Трасса '$targetCityId' установлена во все режимы забегов Classic!")
     }
 }
