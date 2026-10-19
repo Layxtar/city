@@ -285,22 +285,12 @@ object CryptoAndSyncManager {
 
     // ==================== ИНДИВИДУАЛЬНЫЙ РЕДАКТОР СЁРФЕРОВ И ДОСОК CITY ====================
 
-    fun parseCitySurfers(profile: JSONObject): List<CitySurferState> {
+        fun parseCitySurfers(profile: JSONObject): List<CitySurferState> {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
         val map = mutableMapOf<Long, JSONObject>()
         for (i in 0 until currentArray.length()) {
             val obj = currentArray.getJSONObject(i)
             map[obj.getLong("id")] = obj
-        }
-
-        val counters = profile.optJSONArray("counters") ?: JSONArray()
-        val tierMap = mutableMapOf<Long, Int>()
-        for (i in 0 until counters.length()) {
-            val c = counters.getJSONObject(i)
-            if (c.optString("CounterType") == "ScoreLadderUnlockTierCounter") {
-                val idStr = c.optString("Id").removePrefix("DataTag(").removeSuffix(")")
-                idStr.toLongOrNull()?.let { tierMap[it] = c.optInt("Count", 0) }
-            }
         }
 
         return GameDatabase.SURFERS.map { (id, name) ->
@@ -311,7 +301,6 @@ object CryptoAndSyncManager {
                 isUnlocked = obj?.optBoolean("isUnlocked", false) ?: false,
                 level = obj?.optInt("level", 1) ?: 1,
                 highScore = obj?.optLong("highScore", 0L) ?: 0L,
-                tierRank = tierMap[id] ?: 0,
                 selectedSkin = obj?.optInt("selectedSkin", 0) ?: 0
             )
         }
@@ -319,7 +308,6 @@ object CryptoAndSyncManager {
 
     fun applyCitySurfers(profile: JSONObject, states: List<CitySurferState>) {
         val newArray = JSONArray()
-        val counters = profile.optJSONArray("counters") ?: JSONArray()
         for (s in states) {
             if (s.isUnlocked || s.highScore > 0 || s.level > 1) {
                 newArray.put(JSONObject().apply {
@@ -331,14 +319,10 @@ object CryptoAndSyncManager {
                     put("selectedSkin", s.selectedSkin)
                 })
             }
-            if (s.tierRank > 0) {
-                upsertCounter(counters, "LastUnlockedTierCounter", "DataTag(${s.id})", s.tierRank.coerceIn(0, 40))
-                upsertCounter(counters, "ScoreLadderUnlockTierCounter", "DataTag(${s.id})", s.tierRank.coerceIn(0, 40))
-            }
         }
         profile.put("surferProfiles", newArray)
-        profile.put("counters", counters)
     }
+
 
     fun parseCityBoards(profile: JSONObject): List<CityBoardState> {
         val currentArray = profile.optJSONArray("boardProfiles") ?: JSONArray()
