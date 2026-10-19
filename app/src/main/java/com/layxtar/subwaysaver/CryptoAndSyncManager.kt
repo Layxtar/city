@@ -9,13 +9,31 @@ import org.json.JSONObject
 import rikka.shizuku.Shizuku
 import java.io.File
 import java.nio.ByteBuffer
-import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
+
+// Модель состояния отдельного сёрфера в Subway Surfers City
+data class CitySurferState(
+    val id: Long,
+    val name: String,
+    var isUnlocked: Boolean,
+    var level: Int,
+    var highScore: Long,
+    var tierRank: Int,
+    var selectedSkin: Int
+)
+
+// Модель состояния отдельной доски в Subway Surfers City
+data class CityBoardState(
+    val id: Long,
+    val name: String,
+    var isUnlocked: Boolean,
+    var level: Int
+)
 
 object CryptoAndSyncManager {
 
@@ -161,7 +179,6 @@ object CryptoAndSyncManager {
                 execSh("rm -f '$parentDir'/*.tmp '$parentDir'/*.temp 2>/dev/null")
             }
             execSh("sync")
-            log("✅ Сохранение успешно записано!")
             true
         } catch (e: Exception) {
             log("❌ Ошибка записи: ${e.message}")
@@ -184,20 +201,6 @@ object CryptoAndSyncManager {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(intent)
             }
-        }
-    }
-
-    fun exportToDownloadDir(fileName: String, bytes: ByteArray, log: (String) -> Unit): Boolean {
-        return try {
-            val dir = File(DEFAULT_SAVE_DIR)
-            if (!dir.exists()) dir.mkdirs()
-            val outFile = File(dir, fileName)
-            outFile.writeBytes(bytes)
-            log("📂 Сохранено в: ${outFile.absolutePath}")
-            true
-        } catch (_: Exception) {
-            execSh("mkdir -p '$DEFAULT_SAVE_DIR'")
-            writeFileViaShizuku("$DEFAULT_SAVE_DIR/$fileName", bytes, log)
         }
     }
 
@@ -279,7 +282,96 @@ object CryptoAndSyncManager {
         }
     }
 
-    // Открывает всех 27 сёрферов на 20 ур. БЕЗ накрутки их рекорда (сохраняет родной highScore из сейва или ставит 0)
+    // ==================== ИНДИВИДУАЛЬНЫЙ РЕДАКТОР СЁРФЕРОВ И ДОСОК CITY ====================
+
+    fun parseCitySurfers(profile: JSONObject): List<CitySurferState> {
+        val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
+        val map = mutableMapOf<Long, JSONObject>()
+        for (i in 0 until currentArray.length()) {
+            val obj = currentArray.getJSONObject(i)
+            map[obj.getLong("id")] = obj
+        }
+
+        val counters = profile.optJSONArray("counters") ?: JSONArray()
+        val tierMap = mutableMapOf<Long, Int>()
+        for (i in 0 until counters.length()) {
+            val c = counters.getJSONObject(i)
+            if (c.optString("CounterType") == "ScoreLadderUnlockTierCounter") {
+                val idStr = c.optString("Id").removePrefix("DataTag(").removeSuffix(")")
+                idStr.toLongOrNull()?.let { tierMap[it] = c.optInt("Count", 0) }
+            }
+        }
+
+        return GameDatabase.SURFERS.map { (id, name) ->
+            val obj = map[id]
+            CitySurferState(
+                id = id,
+                name = name,
+                isUnlocked = obj?.optBoolean("isUnlocked", false) ?: false,
+                level = obj?.optInt("level", 1) ?: 1,
+                highScore = obj?.optLong("highScore", 0L) ?: 0L,
+                tierRank = tierMap[id] ?: 0,
+                selectedSkin = obj?.optInt("selectedSkin", 0) ?: 0
+            )
+        }
+    }
+
+    fun applyCitySurfers(profile: JSONObject, states: List<CitySurferState>) {
+        val newArray = JSONArray()
+        val counters = profile.optJSONArray("counters") ?: JSONArray()
+        for (s in states) {
+            if (s.isUnlocked || s.highScore > 0 || s.level > 1) {
+                newArray.put(JSONObject().apply {
+                    put("id", s.id)
+                    put("level", s.level.coerceIn(1, 20))
+                    put("isUnlocked", s.isUnlocked)
+                    put("wasSeen", true)
+                    put("highScore", s.highScore)
+                    put("selectedSkin", s.selectedSkin)
+                })
+            }
+            if (s.tierRank > 0) {
+                upsertCounter(counters, "LastUnlockedTierCounter", "DataTag(${s.id})", s.tierRank.coerceIn(0, 40))
+                upsertCounter(counters, "ScoreLadderUnlockTierCounter", "DataTag(${s.id})", s.tierRank.coerceIn(0, 40))
+            }
+        }
+        profile.put("surferProfiles", newArray)
+        profile.put("counters", counters)
+    }
+
+    fun parseCityBoards(profile: JSONObject): List<CityBoardState> {
+        val currentArray = profile.optJSONArray("boardProfiles") ?: JSONArray()
+        val map = mutableMapOf<Long, JSONObject>()
+        for (i in 0 until currentArray.length()) {
+            val obj = currentArray.getJSONObject(i)
+            map[obj.getLong("id")] = obj
+        }
+        return GameDatabase.BOARDS.map { (id, name) ->
+            val obj = map[id]
+            CityBoardState(
+                id = id,
+                name = name,
+                isUnlocked = obj?.optBoolean("isUnlocked", false) ?: false,
+                level = obj?.optInt("level", 1) ?: 1
+            )
+        }
+    }
+
+    fun applyCityBoards(profile: JSONObject, states: List<CityBoardState>) {
+        val newArray = JSONArray()
+        for (b in states) {
+            if (b.isUnlocked || b.level > 1) {
+                newArray.put(JSONObject().apply {
+                    put("id", b.id)
+                    put("level", b.level.coerceIn(1, 20))
+                    put("isUnlocked", b.isUnlocked)
+                    put("wasSeen", true)
+                })
+            }
+        }
+        profile.put("boardProfiles", newArray)
+    }
+
     fun unlockAndMaxAllSurfers(profile: JSONObject) {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
         val existingSkins = mutableMapOf<Long, Int>()
@@ -309,15 +401,6 @@ object CryptoAndSyncManager {
             upsertCounter(counters, "ScoreLadderUnlockTierCounter", "DataTag($id)", 40)
         }
         profile.put("counters", counters)
-    }
-
-    // Отдельная функция для ручной установки рекорда всем сёрферам (вызывается только по кнопке в Статистике)
-    fun setCustomHighScoreForAllSurfers(profile: JSONObject, customHighScore: Long) {
-        val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
-        for (i in 0 until currentArray.length()) {
-            currentArray.getJSONObject(i).put("highScore", customHighScore)
-        }
-        profile.put("surferProfiles", currentArray)
     }
 
     fun unlockAndMaxAllBoards(profile: JSONObject) {
@@ -374,6 +457,23 @@ object CryptoAndSyncManager {
             }
         }
         profile.put("goals", goals)
+    }
+
+    // Выполнение всех активных Ежедневных и Еженедельных заданий в Subway Surfers City
+    fun completeAllDailyAndWeeklyMissions(profile: JSONObject) {
+        val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
+        for (i in 0 until missions.length()) {
+            val m = missions.getJSONObject(i)
+            val curProg = m.optInt("progress", 0)
+            m.put("progress", maxOf(curProg, 100000))
+            m.put("isComplete", true)
+            m.put("isClaimed", false)
+        }
+        profile.put("missionProgresses", missions)
+
+        // Также начисляем очки сезонного пропуска за задания
+        val curSeasonPts = profile.optInt("seasonPassPoints", 0)
+        profile.put("seasonPassPoints", maxOf(curSeasonPts, 15000))
     }
 
     fun injectAllPaidPassesAndDonations(profile: JSONObject) {
@@ -460,27 +560,6 @@ object CryptoAndSyncManager {
         profile.put("missionProgresses", missions)
     }
 
-    fun activateScheduledCampaign(profile: JSONObject, campaignId: String) {
-        profile.put("activeScheduledCampaignProfile", JSONObject().apply {
-            put("activeScheduledCampaignId", campaignId)
-            put("playableSurfers", JSONArray().apply {
-                for ((sId, _) in GameDatabase.SURFERS) put(sId)
-            })
-        })
-        val goals = profile.optJSONArray("goals") ?: JSONArray()
-        val existingGoalIds = mutableSetOf<String>()
-        for (i in 0 until goals.length()) existingGoalIds.add(goals.getJSONObject(i).optString("id"))
-        for (stage in 1..7) {
-            for (goal in 1..3) {
-                val gId = "${campaignId}_stage${stage}_goal$goal"
-                if (existingGoalIds.add(gId)) {
-                    goals.put(JSONObject().put("id", gId).put("completed", true))
-                }
-            }
-        }
-        profile.put("goals", goals)
-    }
-
     fun unlockAllEventTrialsAnd3StarMissions(profile: JSONObject) {
         val goals = profile.optJSONArray("goals") ?: JSONArray()
         val existingGoalIds = mutableSetOf<String>()
@@ -541,40 +620,6 @@ object CryptoAndSyncManager {
             ftue.put(step, true)
         }
         profile.put("ftue", ftue)
-    }
-
-    fun activateAndCompleteQuest(profile: JSONObject, questId: String, missionId: Long) {
-        val quests = profile.optJSONArray("quest") ?: JSONArray()
-        quests.put(JSONObject().apply {
-            put("QuestID", questId)
-            put("AnalyticID", "${questId}_editor_unlock")
-            put("Amount", 50000)
-            put("TimerID", -2010162359)
-            put("SavableItems", JSONArray())
-            put("PendingProgress", 50000)
-        })
-        profile.put("quest", quests)
-
-        val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
-        missions.put(JSONObject().apply {
-            put("id", missionId); put("progress", 50000)
-            put("isComplete", true); put("isClaimed", false)
-            put("creationUnixTimestamp", 0)
-            put("creationUnixTimestampSeconds", Instant.now().epochSecond)
-            put("featureType", "Quest")
-        })
-        profile.put("missionProgresses", missions)
-    }
-
-    fun completeAllExistingMissions(profile: JSONObject, targetProgress: Int = 99999) {
-        val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
-        for (i in 0 until missions.length()) {
-            val m = missions.getJSONObject(i)
-            m.put("progress", maxOf(m.optInt("progress", 0), targetProgress))
-            m.put("isComplete", true)
-            m.put("isClaimed", false)
-        }
-        profile.put("missionProgresses", missions)
     }
 
     fun hackDailyDealsAndAdRewards(profile: JSONObject, dealRewardAmount: Int = 9999, customTag: Long? = null) {
