@@ -9,9 +9,9 @@ object ClassicDatabase {
         "3" to "🛹 Ховерборды (Hoverboards)",
         "4" to "🚀 Фора на старте (HeadStarts)",
         "5" to "⭐ Бустеры очков (ScoreBoosters)",
-        "6" to "🎃 Сезонные монеты (EventCoins)",
-        "11" to "🎟️ Билеты пропуска рекламы (SkipAdTickets)",
-        "12" to "🏆 Жетоны охоты / Билеты гонок (SeasonTokens / Tickets)",
+        "6" to "🎟️ Монеты Событий (EventCoins)",
+        "11" to "🎬 Билеты пропуска рекламы (SkipAdTickets)",
+        "12" to "🎃 Жетоны Сезонной Охоты (Season Hunt Tokens)"
         "7" to "🎨 Баллончики (SprayCan)",
         "8" to "📻 Бумбоксы (Boombox)",
         "9" to "🧢 Кепки (Hat)",
