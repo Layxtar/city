@@ -89,6 +89,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
     var profileJson by remember { mutableStateOf<JSONObject?>(null) }
     var activeProfilePath by remember { mutableStateOf(CryptoAndSyncManager.DEFAULT_GAME_PROFILE_PATH) }
     var isCityLoaded by remember { mutableStateOf(false) }
+    var isClassicWalletLoaded by remember { mutableStateOf(false) }
     var uiTrigger by remember { mutableIntStateOf(0) }
 
     val currencyStates = remember { mutableStateMapOf<Long, String>() }
@@ -101,8 +102,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
     var piggyFilled by remember { mutableStateOf(true) }
     var piggyFreeClaim by remember { mutableStateOf(true) }
 
-    var dealAmountInput by remember { mutableStateOf("9999") }
-    var selectedDealTag by remember { mutableLongStateOf(-1878560402L) }
     var seasonPurchased by remember { mutableStateOf(true) }
     var seasonPoints by remember { mutableStateOf("15000") }
     var selectedSeasonId by remember { mutableStateOf(GameDatabase.SEASONS.first().first) }
@@ -118,7 +117,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
     var globalMultiplier by remember { mutableStateOf("0") }
     var boostedMultiplier by remember { mutableStateOf("3") }
     var leaderboardBestScore by remember { mutableStateOf("99999999") }
-    var allSurfersHighScoreInput by remember { mutableStateOf("25000000") }
 
     var selectedSurferId by remember { mutableLongStateOf(-496667767L) }
     var selectedBoardId by remember { mutableLongStateOf(1711310740L) }
@@ -138,12 +136,14 @@ fun UltimateEditorApp(activity: ComponentActivity) {
     var selectedClassicCity by remember { mutableStateOf(CLASSIC_POPULAR_CITIES.first().first) }
     var customClassicCityInput by remember { mutableStateOf("transylvania") }
 
-    fun refreshUIFromCityProfile(prof: JSONObject) {
-        val wallet = prof.optJSONArray("wallet") ?: JSONArray()
-        for ((tag, _) in GameDatabase.CURRENCIES) currencyStates[tag] = "0"
-        for (i in 0 until wallet.length()) {
-            val item = wallet.getJSONObject(i)
-            currencyStates[item.getLong("dataTag")] = item.getLong("count").toString()
+    fun refreshUIFromCityProfile(prof: JSONObject, reloadWallet: Boolean = true) {
+        if (reloadWallet) {
+            val wallet = prof.optJSONArray("wallet") ?: JSONArray()
+            for ((tag, _) in GameDatabase.CURRENCIES) currencyStates[tag] = "0"
+            for (i in 0 until wallet.length()) {
+                val item = wallet.getJSONObject(i)
+                currencyStates[item.getLong("dataTag")] = item.getLong("count").toString()
+            }
         }
         val purchases = prof.optJSONObject("purchaseHistory") ?: JSONObject()
         for ((pId, _) in GameDatabase.IAP_CATALOG) iapCheckedStates[pId] = purchases.has(pId)
@@ -222,16 +222,18 @@ fun UltimateEditorApp(activity: ComponentActivity) {
         }
         scope.launch {
             isBusy = true
-            statusText = "⏳ Чтение файлов сохранения в фоновом потоке..."
+            statusText = "⏳ Чтение файлов сохранения..."
             if (isCityMode) {
                 val loaded = withContext(Dispatchers.IO) {
                     CryptoAndSyncManager.stopGameForSync(CryptoAndSyncManager.PKG_CITY, false) {}
-                    val path = CryptoAndSyncManager.resolveCityProfilePath {}
-                    val bytes = CryptoAndSyncManager.readFileViaShizuku(path) {}
+                    val path = CryptoAndSyncManager.resolveCityProfilePath(::log)
+                    val bytes = CryptoAndSyncManager.readFileViaShizuku(path, ::log)
                     if (bytes != null) {
                         runCatching {
                             val (cont, prof) = CryptoAndSyncManager.decryptCityProfile(bytes)
                             Triple(path, bytes, cont to prof)
+                        }.onFailure {
+                            log("❌ Ошибка дешифровки City: ${it.message}")
                         }.getOrNull()
                     } else null
                 }
@@ -240,26 +242,46 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                     rawFileBytes = loaded.second
                     containerJson = loaded.third.first
                     profileJson = loaded.third.second
-                    refreshUIFromCityProfile(loaded.third.second)
+                    refreshUIFromCityProfile(loaded.third.second, reloadWallet = true)
                     isCityLoaded = true
-                    log("✅ Профиль Subway City успешно загружен!")
+                    log("✅ Профиль Subway City загружен (Монет: ${currencyStates[-633437229L]})!")
                 } else {
                     log("❌ Профиль Subway City не найден.")
                 }
             } else {
-                val walletJson = withContext(Dispatchers.IO) {
+                val (walletJson, currentCity) = withContext(Dispatchers.IO) {
                     CryptoAndSyncManager.stopGameForSync(ClassicCryptoAndSyncManager.PKG_CLASSIC, false) {}
-                    ClassicCryptoAndSyncManager.readClassicJson("wallet.json") {}.second
+                    val (_, wJson) = ClassicCryptoAndSyncManager.readClassicJson("wallet.json", ::log)
+                    val (_, gcJson) = ClassicCryptoAndSyncManager.readClassicJson("generic_challenges.json") {}
+                    val states = gcJson.optJSONObject("challengeStates")
+                    var foundCity = "transylvania"
+                    if (states != null) {
+                        val k = states.keys()
+                        while (k.hasNext()) {
+                            val c = states.optJSONObject(k.next())?.optString("targetCity", "") ?: ""
+                            if (c.isNotBlank()) {
+                                foundCity = c
+                                break
+                            }
+                        }
+                    }
+                    wJson to foundCity
                 }
                 val currencies = walletJson.optJSONObject("currencies")
                 if (currencies != null) {
                     for ((id, _) in ClassicDatabase.CURRENCIES) {
-                        val v = currencies.optJSONObject(id)?.optLong("value", 0L) ?: 0L
+                        val cObj = currencies.optJSONObject(id)
+                        // В wallet.json если "value" отсутствует (как у ID "0"), значит баланс = 0
+                        val v = cObj?.optLong("value", 0L) ?: 0L
                         classicCurrencies[id] = v.toString()
                     }
-                    log("✅ Твой кошелёк Classic успешно прочитан (Монет: ${classicCurrencies["1"]})!")
+                    customClassicCityInput = currentCity
+                    selectedClassicCity = currentCity
+                    isClassicWalletLoaded = true
+                    log("✅ Кошелёк Classic загружен! Монеты: ${classicCurrencies["1"]}, Ключи: ${classicCurrencies["2"]}")
                 } else {
-                    log("⚠️ Не удалось прочитать wallet.json в Classic.")
+                    isClassicWalletLoaded = false
+                    log("⚠️ Не удалось расшифровать currencies в wallet.json (см. вкладку Логи).")
                 }
             }
             isBusy = false
@@ -278,12 +300,12 @@ fun UltimateEditorApp(activity: ComponentActivity) {
             val newBytes = withContext(Dispatchers.IO) {
                 CryptoAndSyncManager.stopGameForSync(CryptoAndSyncManager.PKG_CITY, true) {}
                 val enc = CryptoAndSyncManager.encryptCityProfile(raw, cont, prof)
-                val ok = CryptoAndSyncManager.writeFileViaShizuku(activeProfilePath, enc) {}
+                val ok = CryptoAndSyncManager.writeFileViaShizuku(activeProfilePath, enc, ::log)
                 if (ok) enc else null
             }
             if (newBytes != null) {
                 rawFileBytes = newBytes
-                log("✅ Профиль Subway City сохранён!")
+                log("✅ Профиль Subway City успешно сохранён!")
                 if (launchAfterSave) CryptoAndSyncManager.launchGame(activity, CryptoAndSyncManager.PKG_CITY, ::log)
             } else {
                 log("❌ Ошибка сохранения профиля City!")
@@ -292,15 +314,27 @@ fun UltimateEditorApp(activity: ComponentActivity) {
         }
     }
 
-    fun saveClassicWalletAsync(launchAfterSave: Boolean) {
-        val map = classicCurrencies.mapValues { it.value.toLongOrNull() ?: 0L }
+    // Умное сохранение Classic: если открыта вкладка Трассы — сохраняет трассу в generic_challenges.json,
+    // а кошелёк перезаписывает ТОЛЬКО если он был успешно загружен!
+    fun saveClassicChangesAsync(launchAfterSave: Boolean) {
         scope.launch {
             isBusy = true
-            statusText = "💾 Шифрование и запись wallet.json..."
+            statusText = "💾 Сохранение изменений Classic..."
             withContext(Dispatchers.IO) {
-                ClassicCryptoAndSyncManager.updateWalletAndInjectDonations(map, false, null, 0) {}
+                if (selectedTab == 2 && customClassicCityInput.isNotBlank()) {
+                    ClassicCryptoAndSyncManager.setClassicEventCityAndUnlockStages(
+                        targetCityId = customClassicCityInput.trim(),
+                        completeAllStages = false,
+                        clearCooldowns = true,
+                        log = ::log
+                    )
+                }
+                if (isClassicWalletLoaded) {
+                    val map = classicCurrencies.mapValues { it.value.toLongOrNull() ?: 0L }
+                    ClassicCryptoAndSyncManager.updateWalletAndInjectDonations(map, false, null, 0, ::log)
+                }
             }
-            log("✅ Кошелёк Classic успешно сохранён!")
+            log("✅ Изменения Classic успешно сохранены!")
             if (launchAfterSave) CryptoAndSyncManager.launchGame(activity, ClassicCryptoAndSyncManager.PKG_CLASSIC, ::log)
             isBusy = false
         }
@@ -339,7 +373,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                     val tabs = if (isCityMode) {
                         listOf("💰 Валюта", "⚡ Мега-Читы", "💳 Донат", "🐷 Копилка & Ивенты", "📊 Статистика", "👥 Команда", "📂 Бэкап & Логи")
                     } else {
-                        listOf("💰 Кошелёк", "⚡ Мега-Читы", "🌍 Выбор Трассы", "🔍 Сёрферы", "🛹 Доски", "🎁 Сундуки")
+                        listOf("💰 Кошелёк", "⚡ Мега-Читы", "🌍 Выбор Трассы", "🔍 Сёрферы", "🛹 Доски", "🎁 Сундуки & Логи")
                     }
                     tabs.forEachIndexed { idx, title ->
                         Tab(selected = selectedTab == idx, onClick = { selectedTab = idx }, text = { Text(title) })
@@ -370,13 +404,13 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             modifier = Modifier.weight(1f),
                             enabled = !isBusy,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
-                            onClick = { saveClassicWalletAsync(false) }
+                            onClick = { saveClassicChangesAsync(false) }
                         ) { Text("💾 Сохранить", fontSize = 12.sp) }
                         Button(
                             modifier = Modifier.weight(1.2f),
                             enabled = !isBusy,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                            onClick = { saveClassicWalletAsync(true) }
+                            onClick = { saveClassicChangesAsync(true) }
                         ) { Text("🚀 В Classic", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold) }
                     }
                 }
@@ -392,9 +426,8 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                 ) {
                     Spacer(modifier = Modifier.height(6.dp))
                     when (selectedTab) {
-                        // ВКЛАДКА 0: ВАЛЮТА CITY (БЕЗ ID)
                         0 -> {
-                            Text("Твои текущие ресурсы в Subway Surfers City. Ты можешь ввести любое число вручную или пополнить все валюты сразу:", fontSize = 12.sp, color = Color.Gray)
+                            Text("Твои текущие ресурсы в Subway Surfers City:", fontSize = 12.sp, color = Color.Gray)
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Button(modifier = Modifier.weight(1f), onClick = {
                                     GameDatabase.CURRENCIES.forEach { (tag, _) ->
@@ -420,7 +453,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             }
                         }
 
-                        // ВКЛАДКА 1: МЕГА-ЧИТЫ CITY (С ПОДРОБНЫМИ ОПИСАНИЯМИ)
                         1 -> {
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -439,7 +471,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                                 CryptoAndSyncManager.hackDailyDealsAndAdRewards(it)
                                                 CryptoAndSyncManager.unlockAllEventTrialsAnd3StarMissions(it)
                                                 CryptoAndSyncManager.configurePiggyBank(it, "shop.piggybankmlp7.3", -2000200805L, 250000, true, true)
-                                                refreshUIFromCityProfile(it)
+                                                refreshUIFromCityProfile(it, reloadWallet = false)
                                                 log("👑 РЕЖИМ БОГА АКТИВИРОВАН: Открыто и прокачано абсолютно всё!")
                                             }
                                         }
@@ -453,7 +485,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                     Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                         profileJson?.let {
                                             CryptoAndSyncManager.unlockAllEventTrialsAnd3StarMissions(it)
-                                            refreshUIFromCityProfile(it)
+                                            refreshUIFromCityProfile(it, reloadWallet = false)
                                             log("🏁 Все ивентовые забеги (Триалы по 3 звезды) и еженедельные трассы разблокированы!")
                                         }
                                     }) { Text("🏁 Открыть все Ивентовые Забеги и Триалы (3 ⭐)") }
@@ -468,7 +500,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                             CryptoAndSyncManager.unlockAndMaxAllSurfers(it)
                                             CryptoAndSyncManager.unlockAndMaxAllBoards(it)
                                             CryptoAndSyncManager.unlockAllSkinsAndAvatars(it)
-                                            refreshUIFromCityProfile(it)
+                                            refreshUIFromCityProfile(it, reloadWallet = false)
                                             log("🏄 Все 27 сёрферов, 29 досок, 125 скинов и 41 аватар открыты!")
                                         }
                                     }) { Text("🏄 Открыть всех Сёрферов, Доски, Костюмы и Аватары") }
@@ -482,7 +514,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                         profileJson?.let {
                                             CryptoAndSyncManager.completeAllDistrictsAndStages(it)
                                             CryptoAndSyncManager.unlockSecretStarsAchievementsAndJackpots(it)
-                                            refreshUIFromCityProfile(it)
+                                            refreshUIFromCityProfile(it, reloadWallet = false)
                                             log("🗺️ Все 6 районов на 3 звезды, Секретные Звёзды и 100% Джекпот активированы!")
                                         }
                                     }) { Text("🗺️ Пройти все 6 Районов (3 ⭐) + 100% Джекпот Сундуков") }
@@ -491,13 +523,12 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             }
                         }
 
-                        // ВКЛАДКА 2: ДОНАТ С УДОБНЫМИ ФИЛЬТРАМИ КАТЕГОРИЙ (БЕЗ ID)
                         2 -> {
                             val _trigger = uiTrigger
                             Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                 profileJson?.let {
                                     CryptoAndSyncManager.injectAllPaidPassesAndDonations(it)
-                                    refreshUIFromCityProfile(it)
+                                    refreshUIFromCityProfile(it, reloadWallet = false)
                                     log("💳 Весь платный контент и пропуска активированы!")
                                 }
                             }) { Text("💳 Разблокировать ВЕСЬ Донат в 1 клик") }
@@ -547,7 +578,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             }
                         }
 
-                        // ВКЛАДКА 3: СВИНЬЯ-КОПИЛКА (ВСЁ В ОДНОМ МЕСТЕ) + СЕЗОН + ИВЕНТЫ
                         3 -> {
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -569,7 +599,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                         Checkbox(checked = piggyFreeClaim, onCheckedChange = { piggyFreeClaim = it })
                                         Text("Сделать открытие копилки БЕСПЛАТНЫМ (добавить в купленные)")
                                     }
-                                    Text("Выбери уровень копилки:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                                     GameDatabase.PIGGY_BANKS.forEach { (pId, pair) ->
                                         val (mId, desc) = pair
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -583,7 +612,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                     Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                         profileJson?.let {
                                             CryptoAndSyncManager.configurePiggyBank(it, selectedPiggyId, selectedPiggyMission, piggyProgress.toIntOrNull() ?: 250000, piggyFilled, piggyFreeClaim)
-                                            refreshUIFromCityProfile(it)
+                                            refreshUIFromCityProfile(it, reloadWallet = false)
                                             log("🐷 Свинья-копилка настроена на $piggyProgress монет (Бесплатно: $piggyFreeClaim)!")
                                         }
                                     }) { Text("🐷 Применить все настройки Свиньи-Копилки") }
@@ -603,8 +632,8 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                     Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                         profileJson?.let {
                                             CryptoAndSyncManager.activateScheduledCampaign(it, selectedCampaignId)
-                                            refreshUIFromCityProfile(it)
-                                            log("🎢 Ивентовая трасса активирована и пройдена на 3 звезды!")
+                                            refreshUIFromCityProfile(it, reloadWallet = false)
+                                            log("🎢 Ивентовая трасса '$selectedCampaignId' активирована! Нажми «💾 Сохранить» внизу.")
                                         }
                                     }) { Text("🎢 Активировать выбранную трассу") }
                                 }
@@ -613,7 +642,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("🏆 Включение Праздничных Квестов и Завершение Миссий", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Активирует любой секретный или праздничный квест с выполненной шкалой очков для мгновенного сбора наград.", fontSize = 12.sp, color = Color.Gray)
                                     GameDatabase.QUESTS.forEach { (qId, pair) ->
                                         val (mId, qTitle) = pair
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -625,7 +653,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                         profileJson?.let {
                                             CryptoAndSyncManager.activateAndCompleteQuest(it, selectedQuestId, selectedQuestMission)
                                             CryptoAndSyncManager.completeAllExistingMissions(it, 99999)
-                                            refreshUIFromCityProfile(it)
+                                            refreshUIFromCityProfile(it, reloadWallet = false)
                                             log("🏆 Квест активирован, а все текущие миссии выполнены!")
                                         }
                                     }) { Text("🏆 Активировать квест + Выполнить все миссии") }
@@ -633,7 +661,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             }
                         }
 
-                        // ВКЛАДКА 4: СТАТИСТИКА И РЕКОРДЫ
                         4 -> {
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -648,7 +675,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             }
                         }
 
-                        // ВКЛАДКА 5: КОМАНДА И ГЕРОИ (БЕЗ ID)
                         5 -> {
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -686,12 +712,10 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             }
                         }
 
-                        // ВКЛАДКА 6: БЭКАП И ЛОГИ
                         6 -> {
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("📂 Резервное копирование и восстановление", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Перед каждым сохранением редактор автоматически создаёт резервную копию `.bak_editor`. Если что-то пошло не так, нажми кнопку отката ниже:", fontSize = 12.sp, color = Color.Gray)
                                     OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
                                         scope.launch {
                                             val ok = withContext(Dispatchers.IO) { CryptoAndSyncManager.restoreBackup(activeProfilePath, ::log) }
@@ -716,32 +740,36 @@ fun UltimateEditorApp(activity: ComponentActivity) {
             } else {
                 // ==================== РЕЖИМ CLASSIC SUBWAY SURFERS ====================
                 when (selectedTab) {
-                    // ВКЛАДКА 0: КОШЕЛЁК CLASSIC (БЕЗ ID)
                     0 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Spacer(modifier = Modifier.height(6.dp))
-                            Text("Твои реальные значения из `wallet.json`. Нажми «💾 Сохранить» внизу экрана после изменения чисел:", fontSize = 12.sp, color = Color.Gray)
+                            Text("Твой реальный баланс из `wallet.json`. После изменения нажми «💾 Сохранить»:", fontSize = 12.sp, color = Color.Gray)
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Button(modifier = Modifier.weight(1f), onClick = {
                                     ClassicDatabase.CURRENCIES.forEach { (id, _) ->
                                         val c = classicCurrencies[id]?.toLongOrNull() ?: 0L
                                         classicCurrencies[id] = (c + 100000L).toString()
                                     }
+                                    isClassicWalletLoaded = true
                                     log("➕ Ко всем ресурсам Classic добавлено +100 000")
                                 }) { Text("+100K ко всем") }
 
                                 Button(modifier = Modifier.weight(1f), onClick = {
                                     ClassicDatabase.CURRENCIES.forEach { (id, _) -> classicCurrencies[id] = "99999999" }
+                                    isClassicWalletLoaded = true
                                     log("💎 Все валюты и билеты выставлены на 99 999 999!")
                                 }) { Text("💎 ВСЁ НА 99.9M") }
                             }
                             ClassicDatabase.CURRENCIES.forEach { (id, title) ->
                                 OutlinedTextField(
                                     value = classicCurrencies[id] ?: "0",
-                                    onValueChange = { classicCurrencies[id] = it },
+                                    onValueChange = {
+                                        classicCurrencies[id] = it
+                                        isClassicWalletLoaded = true
+                                    },
                                     label = { Text(title) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                     modifier = Modifier.fillMaxWidth()
@@ -751,7 +779,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                         }
                     }
 
-                    // ВКЛАДКА 1: МЕГА-ЧИТЫ ДЛЯ CLASSIC (С ПОДРОБНЫМИ ОПИСАНИЯМИ)
                     1 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -768,12 +795,12 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                                 isBusy = true
                                                 withContext(Dispatchers.IO) {
                                                     val map = classicCurrencies.mapValues { 99999999L }
-                                                    ClassicCryptoAndSyncManager.updateWalletAndInjectDonations(map, true, "super_mystery_box", 25) {}
-                                                    ClassicCryptoAndSyncManager.unlockDoubleCoinsAndMaxUpgrades {}
-                                                    ClassicCryptoAndSyncManager.unlockClassicSurfers(null, null) {}
-                                                    ClassicCryptoAndSyncManager.unlockClassicBoards(null, null) {}
-                                                    ClassicCryptoAndSyncManager.maxSeasonHuntMissionsAndAchievements {}
-                                                    ClassicCryptoAndSyncManager.unlockAllPortraitsAndFrames {}
+                                                    ClassicCryptoAndSyncManager.updateWalletAndInjectDonations(map, true, "super_mystery_box", 25, ::log)
+                                                    ClassicCryptoAndSyncManager.unlockDoubleCoinsAndMaxUpgrades(::log)
+                                                    ClassicCryptoAndSyncManager.unlockClassicSurfers(null, null, ::log)
+                                                    ClassicCryptoAndSyncManager.unlockClassicBoards(null, null, ::log)
+                                                    ClassicCryptoAndSyncManager.maxSeasonHuntMissionsAndAchievements(::log)
+                                                    ClassicCryptoAndSyncManager.unlockAllPortraitsAndFrames(::log)
                                                 }
                                                 loadProfileAsync()
                                                 log("👑 РЕЖИМ БОГА ДЛЯ CLASSIC АКТИВИРОВАН!")
@@ -790,8 +817,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                     Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                         scope.launch {
                                             isBusy = true
-                                            withContext(Dispatchers.IO) { ClassicCryptoAndSyncManager.unlockDoubleCoinsAndMaxUpgrades {} }
-                                            log("🪙 Двойные монеты, множитель счёта и бустеры 6 ур. включены!")
+                                            withContext(Dispatchers.IO) { ClassicCryptoAndSyncManager.unlockDoubleCoinsAndMaxUpgrades(::log) }
                                             isBusy = false
                                         }
                                     }) { Text("🪙 Включить Двойные Монеты + Множитель + Бустеры 6 Ур.") }
@@ -804,8 +830,8 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                     Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                         scope.launch {
                                             isBusy = true
-                                            val map = classicCurrencies.mapValues { it.value.toLongOrNull() ?: 9999999L }
-                                            withContext(Dispatchers.IO) { ClassicCryptoAndSyncManager.updateWalletAndInjectDonations(map, true, null, 0) {} }
+                                            val map = classicCurrencies.mapValues { it.value.toLongOrNull() ?: 0L }
+                                            withContext(Dispatchers.IO) { ClassicCryptoAndSyncManager.updateWalletAndInjectDonations(map, true, null, 0, ::log) }
                                             log("🚫 Реклама отключена, Surfer Pass Plus и платные наборы разблокированы!")
                                             isBusy = false
                                         }
@@ -820,10 +846,9 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                         scope.launch {
                                             isBusy = true
                                             withContext(Dispatchers.IO) {
-                                                ClassicCryptoAndSyncManager.maxSeasonHuntMissionsAndAchievements {}
-                                                ClassicCryptoAndSyncManager.unlockAllPortraitsAndFrames {}
+                                                ClassicCryptoAndSyncManager.maxSeasonHuntMissionsAndAchievements(::log)
+                                                ClassicCryptoAndSyncManager.unlockAllPortraitsAndFrames(::log)
                                             }
-                                            log("🏆 Все 40 наград Сезонной Охоты, 114 портретов, 56 рамок, Трофеи и Ачивки открыты!")
                                             isBusy = false
                                         }
                                     }) { Text("🏆 Пройти Сезонную Охоту + Открыть Портреты, Рамки и Ачивки") }
@@ -834,7 +859,7 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                         }
                     }
 
-                    // ВКЛАДКА 2: ВЫБОР ТРАССЫ (ГОРОДА) В CLASSIC
+                    // ВКЛАДКА 2: ВЫБОР ТРАССЫ (ЗАПИСЫВАЕТСЯ СТРОГО В generic_challenges.json)
                     2 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -844,12 +869,12 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("🌍 Переключатель Трасс (Городов) для Забегов Classic", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Позволяет установить любой город во все активные ивентовые забеги (Марафон, Tag Time Attack, Floor is Lava, Trick or Treat), мгновенно пройти все этапы без рекламы и убрать таймеры отдыха сёрферов.", fontSize = 12.sp, color = Color.Gray)
+                                    Text("Записывает выбранный город напрямую в файл `generic_challenges.json` и `user_stats.json` (не затрагивая кошелёк `wallet.json`).", fontSize = 12.sp, color = Color.Gray)
 
                                     OutlinedTextField(
                                         value = customClassicCityInput,
                                         onValueChange = { customClassicCityInput = it },
-                                        label = { Text("Выбранная трасса (или впиши код любого города)") },
+                                        label = { Text("Выбранная трасса (код города)") },
                                         modifier = Modifier.fillMaxWidth()
                                     )
 
@@ -881,10 +906,10 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                             }
                                             isBusy = false
                                         }
-                                    }) { Text("🏃 Только сменить Трассу и сбросить таймеры (без авто-прохождения)") }
+                                    }) { Text("🏃 Только сменить Трассу и сбросить таймеры") }
 
                                     Divider(modifier = Modifier.padding(vertical = 4.dp))
-                                    Text("Популярные города и специальные карты:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    Text("Выбери трассу из списка (она сразу запишется в игру):", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                                     CLASSIC_POPULAR_CITIES.forEach { (cityCode, cityName) ->
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             RadioButton(
@@ -892,6 +917,18 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                                 onClick = {
                                                     selectedClassicCity = cityCode
                                                     customClassicCityInput = cityCode
+                                                    scope.launch {
+                                                        isBusy = true
+                                                        withContext(Dispatchers.IO) {
+                                                            ClassicCryptoAndSyncManager.setClassicEventCityAndUnlockStages(
+                                                                targetCityId = cityCode,
+                                                                completeAllStages = false,
+                                                                clearCooldowns = true,
+                                                                log = ::log
+                                                            )
+                                                        }
+                                                        isBusy = false
+                                                    }
                                                 }
                                             )
                                             Text(cityName, fontSize = 13.sp)
@@ -903,7 +940,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                         }
                     }
 
-                    // ВКЛАДКА 3: БЫСТРЫЙ ПОИСК СЁРФЕРОВ (LAZYCOLUMN БЕЗ ФРИЗОВ И БЕЗ ID)
                     3 -> {
                         val filteredSurfers = remember(classicSearchQuery) {
                             ClassicDatabase.CLASSIC_SURFERS.filter {
@@ -969,7 +1005,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                         }
                     }
 
-                    // ВКЛАДКА 4: БЫСТРЫЙ ПОИСК ДОСОК (LAZYCOLUMN БЕЗ ФРИЗОВ И БЕЗ ID)
                     4 -> {
                         val filteredBoards = remember(classicSearchQuery) {
                             ClassicDatabase.CLASSIC_BOARDS.filter {
@@ -1030,7 +1065,6 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                         }
                     }
 
-                    // ВКЛАДКА 5: ВЫДАЧА СУНДУКОВ В ОЧЕРЕДЬ ОТКРЫТИЯ
                     5 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -1057,16 +1091,20 @@ fun UltimateEditorApp(activity: ComponentActivity) {
                                     Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                         scope.launch {
                                             isBusy = true
-                                            val map = classicCurrencies.mapValues { it.value.toLongOrNull() ?: 9999999L }
+                                            val map = classicCurrencies.mapValues { it.value.toLongOrNull() ?: 0L }
                                             val cnt = classicLootboxCount.toIntOrNull() ?: 20
                                             withContext(Dispatchers.IO) {
-                                                ClassicCryptoAndSyncManager.updateWalletAndInjectDonations(map, true, selectedClassicLootbox, cnt) {}
+                                                ClassicCryptoAndSyncManager.updateWalletAndInjectDonations(map, true, selectedClassicLootbox, cnt, ::log)
                                             }
                                             log("🎁 Добавлено $cnt сундуков в очередь открытия!")
                                             isBusy = false
                                         }
                                     }) { Text("🎁 Выдать выбранные сундуки") }
                                 }
+                            }
+                            Text("📜 Журнал операций Classic:", fontWeight = FontWeight.Bold)
+                            Box(modifier = Modifier.fillMaxWidth().height(200.dp).background(Color.Black).padding(8.dp)) {
+                                Text(text = logs, color = Color.Green, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.verticalScroll(rememberScrollState()))
                             }
                             Spacer(modifier = Modifier.height(90.dp))
                         }
