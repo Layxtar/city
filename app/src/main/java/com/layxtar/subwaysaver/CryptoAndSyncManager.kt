@@ -20,6 +20,7 @@ import javax.crypto.spec.SecretKeySpec
 object CryptoAndSyncManager {
 
     const val PKG_CITY = "com.sybogames.subway.surfers.game"
+    const val PKG_CLASSIC = "com.kiloo.subwaysurf"
     const val PKG_SHIZUKU = "moe.shizuku.privileged.api"
 
     const val DEFAULT_GAME_PROFILE_PATH =
@@ -67,8 +68,10 @@ object CryptoAndSyncManager {
     fun requestPermissionOrOpenShizuku(context: Context, log: (String) -> Unit) {
         try {
             if (isServiceRunning()) {
+                log("⚠️ Запрос разрешения у Shizuku...")
                 Shizuku.requestPermission(42)
             } else {
+                log("⚠️ Открываем приложение Shizuku...")
                 val intent = context.packageManager?.getLaunchIntentForPackage(PKG_SHIZUKU)
                 if (intent != null) {
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -95,8 +98,10 @@ object CryptoAndSyncManager {
             val output = process.inputStream.bufferedReader().readText()
             val errOutput = process.errorStream.bufferedReader().readText()
             val code = process.waitFor()
+            if (errOutput.isNotBlank()) log?.invoke("⚙️ [stderr]: ${errOutput.trim()}")
             code to (output + errOutput)
         } catch (e: Exception) {
+            log?.invoke("⚠️ Ошибка Shizuku shell: ${e.message}")
             -1 to (e.message ?: "Error")
         }
     }
@@ -120,13 +125,14 @@ object CryptoAndSyncManager {
     }
 
     fun readFileViaShizuku(path: String, log: (String) -> Unit): ByteArray? {
-        val (code, result) = execSh("cat '$path' | base64 2>&1", log)
+        val (code, result) = execSh("cat '$path' | base64 2>&1")
         if (code != 0 || result.isBlank()) return null
         return try {
             val cleanBase64 = result.replace("\n", "").replace("\r", "").replace(Regex("\\s+"), "").trim()
             val data = Base64.decode(cleanBase64, Base64.DEFAULT)
             if (data.isNotEmpty()) data else null
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            log("❌ Ошибка чтения файла: ${e.message}")
             null
         }
     }
@@ -147,16 +153,18 @@ object CryptoAndSyncManager {
                 execSh("printf '%s' '$chunk' $op '$tempB64'")
                 offset += CHUNK_SIZE
             }
-            execSh("base64 -d '$tempB64' > '$tempFile'", log)
-            val (_, result) = execSh("cp '$tempFile' '$path' 2>&1 && echo 'DONE'", log)
+            execSh("base64 -d '$tempB64' > '$tempFile'")
+            val (_, result) = execSh("cp '$tempFile' '$path' 2>&1 && echo 'DONE'")
             if (!result.contains("DONE")) return false
 
             File(path).parent?.let { parentDir ->
                 execSh("rm -f '$parentDir'/*.tmp '$parentDir'/*.temp 2>/dev/null")
             }
             execSh("sync")
+            log("✅ Сохранение успешно записано!")
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            log("❌ Ошибка записи: ${e.message}")
             false
         } finally {
             try { execSh("rm -f '$tempB64' '$tempFile' 2>/dev/null") } catch (_: Exception) { }
@@ -168,7 +176,8 @@ object CryptoAndSyncManager {
     }
 
     fun launchGame(context: Context, packageName: String = PKG_CITY, log: (String) -> Unit) {
-        val (code, _) = execSh("monkey -p $packageName -c android.intent.category.LAUNCHER 1", log)
+        log("🚀 Запускаем игру...")
+        val (code, _) = execSh("monkey -p $packageName -c android.intent.category.LAUNCHER 1")
         if (code != 0) {
             val intent = context.packageManager?.getLaunchIntentForPackage(packageName)
             if (intent != null) {
@@ -178,8 +187,28 @@ object CryptoAndSyncManager {
         }
     }
 
+    fun exportToDownloadDir(fileName: String, bytes: ByteArray, log: (String) -> Unit): Boolean {
+        return try {
+            val dir = File(DEFAULT_SAVE_DIR)
+            if (!dir.exists()) dir.mkdirs()
+            val outFile = File(dir, fileName)
+            outFile.writeBytes(bytes)
+            log("📂 Сохранено в: ${outFile.absolutePath}")
+            true
+        } catch (_: Exception) {
+            execSh("mkdir -p '$DEFAULT_SAVE_DIR'")
+            writeFileViaShizuku("$DEFAULT_SAVE_DIR/$fileName", bytes, log)
+        }
+    }
+
+    fun restoreBackup(path: String, log: (String) -> Unit): Boolean {
+        stopGameForSync(PKG_CITY, true, log)
+        val (_, out) = execSh("if [ -f '$path.bak_editor' ]; then cp '$path.bak_editor' '$path' && sync && echo 'RESTORED'; fi")
+        return out.contains("RESTORED")
+    }
+
     fun decryptCityProfile(rawBytes: ByteArray): Pair<JSONObject, JSONObject> {
-        require(rawBytes.size >= 32) { "Файл слишком мал" }
+        require(rawBytes.size >= 32) { "Файл слишком мал (< 32 байт)" }
         val iv = rawBytes.copyOfRange(0, 16)
         val key = rawBytes.copyOfRange(16, 32)
         val encrypted = rawBytes.copyOfRange(32, rawBytes.size)
@@ -380,14 +409,14 @@ object CryptoAndSyncManager {
             put("skippedCount", 0)
             put("lastSentAnalyticsProgress", 10)
             put("isFilled", isFilled)
-            put("isFree", makeFreeToClaim)
-            put("canClaimForFree", makeFreeToClaim)
         })
 
         if (makeFreeToClaim) {
             val purchaseHistory = profile.optJSONObject("purchaseHistory") ?: JSONObject()
             val nowIso = Instant.now().toString()
-            purchaseHistory.put(piggyId, JSONObject().put("PurchaseCount", 1).put("PurchaseDates", JSONArray().put(nowIso)))
+            for ((pId, _) in GameDatabase.PIGGY_BANKS) {
+                purchaseHistory.put(pId, JSONObject().put("PurchaseCount", 1).put("PurchaseDates", JSONArray().put(nowIso)))
+            }
             profile.put("purchaseHistory", purchaseHistory)
         }
 
@@ -422,12 +451,208 @@ object CryptoAndSyncManager {
             })
         })
         val goals = profile.optJSONArray("goals") ?: JSONArray()
+        val existingGoalIds = mutableSetOf<String>()
+        for (i in 0 until goals.length()) existingGoalIds.add(goals.getJSONObject(i).optString("id"))
         for (stage in 1..7) {
             for (goal in 1..3) {
-                goals.put(JSONObject().put("id", "${campaignId}_stage${stage}_goal$goal").put("completed", true))
+                val gId = "${campaignId}_stage${stage}_goal$goal"
+                if (existingGoalIds.add(gId)) {
+                    goals.put(JSONObject().put("id", gId).put("completed", true))
+                }
             }
         }
         profile.put("goals", goals)
+    }
+
+    // Безопасная разблокировка ВСЕХ ивентовых триалов (5 миссий по 3 звезды + все Scheduled Campaigns) без поломки сохранения!
+    fun unlockAllEventTrialsAnd3StarMissions(profile: JSONObject) {
+        val goals = profile.optJSONArray("goals") ?: JSONArray()
+        val existingGoalIds = mutableSetOf<String>()
+        for (i in 0 until goals.length()) {
+            val g = goals.getJSONObject(i)
+            g.put("completed", true)
+            existingGoalIds.add(g.optString("id"))
+        }
+
+        // Закрываем на 3 звезды все ивентовые забеги из базы (5..7 миссий по 3 звезды)
+        for ((campId, _) in GameDatabase.SCHEDULED_CAMPAIGNS) {
+            for (stage in 1..7) {
+                for (goal in 1..3) {
+                    val gId = "${campId}_stage${stage}_goal$goal"
+                    if (existingGoalIds.add(gId)) {
+                        goals.put(JSONObject().put("id", gId).put("completed", true))
+                    }
+                }
+            }
+        }
+
+        // Дополнительно закрываем стандартные префиксы триалов (по 5 миссий на 3 звезды)
+        val trialPrefixes = listOf("trial", "daily_trial", "event_trial", "weekly_trial")
+        for (prefix in trialPrefixes) {
+            for (stage in 1..5) {
+                for (goal in 1..3) {
+                    val gId = "${prefix}_stage${stage}_goal$goal"
+                    if (existingGoalIds.add(gId)) {
+                        goals.put(JSONObject().put("id", gId).put("completed", true))
+                    }
+                }
+            }
+        }
+        profile.put("goals", goals)
+
+        // Разрешаем играть любыми сёрферами в активном ивентовом забеге
+        val activeCamp = profile.optJSONObject("activeScheduledCampaignProfile") ?: JSONObject()
+        if (!activeCamp.has("activeScheduledCampaignId")) {
+            activeCamp.put("activeScheduledCampaignId", GameDatabase.SCHEDULED_CAMPAIGNS.first().first)
+        }
+        activeCamp.put("playableSurfers", JSONArray().apply {
+            for ((sId, _) in GameDatabase.SURFERS) put(sId)
+        })
+        profile.put("activeScheduledCampaignProfile", activeCamp)
+
+        // Безопасно обновляем ТОЛЬКО уже существующие в профиле записи dailyTrials (без добавления чужих ID!)
+        val trials = profile.optJSONArray("dailyTrials")
+        if (trials != null) {
+            for (i in 0 until trials.length()) {
+                trials.getJSONObject(i).apply {
+                    put("attempts", 0)
+                    put("claimedGoalRewards", 0)
+                }
+            }
+        }
+
+        profile.put("timers", JSONObject())
+        profile.optJSONObject("onlinePlayerProfile")?.put("renameableAt", "0001-01-01T00:00:00")
+
+        val ftue = profile.optJSONObject("ftue") ?: JSONObject()
+        for (step in GameDatabase.FTUE_STEPS) {
+            ftue.put(step, true)
+        }
+        profile.put("ftue", ftue)
+    }
+
+    fun activateAndCompleteQuest(profile: JSONObject, questId: String, missionId: Long) {
+        val quests = profile.optJSONArray("quest") ?: JSONArray()
+        quests.put(JSONObject().apply {
+            put("QuestID", questId)
+            put("AnalyticID", "${questId}_editor_unlock")
+            put("Amount", 50000)
+            put("TimerID", -2010162359)
+            put("SavableItems", JSONArray())
+            put("PendingProgress", 50000)
+        })
+        profile.put("quest", quests)
+
+        val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
+        missions.put(JSONObject().apply {
+            put("id", missionId); put("progress", 50000)
+            put("isComplete", true); put("isClaimed", false)
+            put("creationUnixTimestamp", 0)
+            put("creationUnixTimestampSeconds", Instant.now().epochSecond)
+            put("featureType", "Quest")
+        })
+        profile.put("missionProgresses", missions)
+    }
+
+    fun completeAllExistingMissions(profile: JSONObject, targetProgress: Int = 99999) {
+        val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
+        for (i in 0 until missions.length()) {
+            val m = missions.getJSONObject(i)
+            m.put("progress", maxOf(m.optInt("progress", 0), targetProgress))
+            m.put("isComplete", true)
+            m.put("isClaimed", false)
+        }
+        profile.put("missionProgresses", missions)
+    }
+
+    fun hackDailyDealsAndAdRewards(profile: JSONObject, dealRewardAmount: Int = 9999, customTag: Long? = null) {
+        val defaultTags = longArrayOf(-1878560402L, -1509662453L, -1085419483L, -635142441L, -2008679869L, 326719861L)
+        val dealsArray = JSONArray()
+        for (i in 0 until 6) {
+            dealsArray.put(JSONObject().apply {
+                put("slotId", "daily_deal_${i + 1}")
+                put("slotSeed", 10 + i)
+                put("itemDatatag", customTag ?: defaultTags[i])
+                put("amount", dealRewardAmount)
+            })
+        }
+        profile.put("dailyDeal", JSONObject().put("dailyDeals", dealsArray))
+
+        val adRewards = JSONArray()
+        val adTags = longArrayOf(-635142441L, -2008679869L, 326719861L, 1669706535L, -633437229L, -1085419483L, -1878560402L, 722065917L, -1509662453L)
+        for (tag in adTags) {
+            adRewards.put(JSONObject().apply {
+                put("RewardType", customTag ?: tag)
+                put("RewardValue", dealRewardAmount)
+                put("Claimed", false)
+            })
+        }
+        profile.put("dailyAdRewards", adRewards)
+    }
+
+    fun unlockSecretStarsAchievementsAndJackpots(profile: JSONObject) {
+        val counters = profile.optJSONArray("counters") ?: JSONArray()
+        for (starTag in GameDatabase.SECRET_STAR_TAGS) {
+            upsertCounter(counters, "SecretStarCounter", "DataTag($starTag)", 10)
+        }
+        upsertCounter(counters, "PityCounter", "mysterybox_regular", 9)
+        upsertCounter(counters, "PityCounter", "shop.box.ad", 9)
+        upsertCounter(counters, "PityCounter", "shop.box.ad.board", 9)
+        upsertCounter(counters, "PityCounter", "shop.box.ad.repeatable", 9)
+        upsertCounter(counters, "DailyDealCounter", "daily_deal", 0)
+        profile.put("counters", counters)
+
+        val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
+        for ((achId, target) in GameDatabase.ACHIEVEMENT_MISSIONS) {
+            var exists = false
+            for (i in 0 until missions.length()) {
+                val m = missions.getJSONObject(i)
+                if (m.optLong("id") == achId) {
+                    m.put("progress", target); m.put("isComplete", true); m.put("isClaimed", false)
+                    exists = true
+                }
+            }
+            if (!exists) {
+                missions.put(JSONObject().apply {
+                    put("id", achId); put("progress", target)
+                    put("isComplete", true); put("isClaimed", false)
+                    put("creationUnixTimestamp", 0)
+                    put("creationUnixTimestampSeconds", Instant.now().epochSecond)
+                    put("featureType", "Achievement")
+                })
+            }
+        }
+        profile.put("missionProgresses", missions)
+    }
+
+    fun patchGameConfigsViaShizuku(cacheDir: File, log: (String) -> Unit): String {
+        val (_, findOut) = execSh("find /storage/emulated/0/Android/data/$PKG_CITY -name 'manifest.json' 2>/dev/null | head -n 1")
+        val manifestPath = findOut.trim()
+        if (manifestPath.isEmpty()) {
+            val msg = "ℹ️ Кэш manifest.json не найден. Все читы применены напрямую в профиль!"
+            log(msg)
+            return msg
+        }
+        val configDir = File(manifestPath).parent ?: return "Ошибка пути"
+        val manifestBytes = readFileViaShizuku(manifestPath, log) ?: return "Не удалось прочитать manifest.json"
+        val manifestJson = JSONObject(String(manifestBytes, Charsets.UTF_8))
+        val objects = manifestJson.optJSONObject("objects") ?: return "Неверный формат manifest.json"
+
+        val ticketJson = """{"maxTicket":999,"regenerationCooldownInSeconds":1,"ticketCostPerPlay":0}"""
+        patchSingleConfig(configDir, objects, "campaignTicketingConfig", "campaignTicketingConfig.json", ticketJson, log)
+
+        val noAdsJson = """{"configurations":[{"countryTier":3,"minimumPlayerLevelToDisplayInterstitial":999,"rewardedVideoAdCooldown":0,"maximumCapacity":0,"coolDownBetweenInterstitials":999999,"minimumRunNumber":99999,"skipInterstitialIfRVInLastRun":true,"percentageFirstInterstitial":0,"percentageAfterFirstInterstitial":0}]}"""
+        patchSingleConfig(configDir, objects, "interstitials", "interstitials.json", noAdsJson, log)
+
+        writeFileViaShizuku(manifestPath, manifestJson.toString().toByteArray(Charsets.UTF_8), log)
+        return "✅ Конфиги пропатчены, SHA-1 ключи в manifest.json обновлены!"
+    }
+
+    private fun patchSingleConfig(configDir: String, objects: JSONObject, keyName: String, fileName: String, content: String, log: (String) -> Unit) {
+        val bytes = content.toByteArray(Charsets.UTF_8)
+        val sha1 = MessageDigest.getInstance("SHA-1").digest(bytes).joinToString("") { "%02x".format(it) }
+        writeFileViaShizuku("$configDir/$fileName", bytes, log)
+        objects.optJSONObject(keyName)?.put("key", sha1)
     }
 
     fun upsertCounter(counters: JSONArray, type: String, id: String, count: Int) {
