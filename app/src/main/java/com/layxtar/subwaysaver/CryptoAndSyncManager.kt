@@ -279,7 +279,7 @@ object CryptoAndSyncManager {
         }
     }
 
-        // Открывает и прокачивает всех 27 сёрферов до 20 ур. БЕЗ накрутки их статистики забегов (сохраняет родной highScore)
+    // Открывает всех 27 сёрферов на 20 ур. БЕЗ накрутки их рекорда (сохраняет родной highScore из сейва или ставит 0)
     fun unlockAndMaxAllSurfers(profile: JSONObject) {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
         val existingSkins = mutableMapOf<Long, Int>()
@@ -311,7 +311,7 @@ object CryptoAndSyncManager {
         profile.put("counters", counters)
     }
 
-    // Отдельная функция (по желанию): установить кастомный рекорд всем сёрферам
+    // Отдельная функция для ручной установки рекорда всем сёрферам (вызывается только по кнопке в Статистике)
     fun setCustomHighScoreForAllSurfers(profile: JSONObject, customHighScore: Long) {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
         for (i in 0 until currentArray.length()) {
@@ -319,7 +319,6 @@ object CryptoAndSyncManager {
         }
         profile.put("surferProfiles", currentArray)
     }
-
 
     fun unlockAndMaxAllBoards(profile: JSONObject) {
         val newArray = JSONArray()
@@ -482,7 +481,6 @@ object CryptoAndSyncManager {
         profile.put("goals", goals)
     }
 
-    // Безопасная разблокировка ВСЕХ ивентовых триалов (5 миссий по 3 звезды + все Scheduled Campaigns) без поломки сохранения!
     fun unlockAllEventTrialsAnd3StarMissions(profile: JSONObject) {
         val goals = profile.optJSONArray("goals") ?: JSONArray()
         val existingGoalIds = mutableSetOf<String>()
@@ -492,7 +490,6 @@ object CryptoAndSyncManager {
             existingGoalIds.add(g.optString("id"))
         }
 
-        // Закрываем на 3 звезды все ивентовые забеги из базы (5..7 миссий по 3 звезды)
         for ((campId, _) in GameDatabase.SCHEDULED_CAMPAIGNS) {
             for (stage in 1..7) {
                 for (goal in 1..3) {
@@ -504,7 +501,6 @@ object CryptoAndSyncManager {
             }
         }
 
-        // Дополнительно закрываем стандартные префиксы триалов (по 5 миссий на 3 звезды)
         val trialPrefixes = listOf("trial", "daily_trial", "event_trial", "weekly_trial")
         for (prefix in trialPrefixes) {
             for (stage in 1..5) {
@@ -518,7 +514,6 @@ object CryptoAndSyncManager {
         }
         profile.put("goals", goals)
 
-        // Разрешаем играть любыми сёрферами в активном ивентовом забеге
         val activeCamp = profile.optJSONObject("activeScheduledCampaignProfile") ?: JSONObject()
         if (!activeCamp.has("activeScheduledCampaignId")) {
             activeCamp.put("activeScheduledCampaignId", GameDatabase.SCHEDULED_CAMPAIGNS.first().first)
@@ -528,7 +523,6 @@ object CryptoAndSyncManager {
         })
         profile.put("activeScheduledCampaignProfile", activeCamp)
 
-        // Безопасно обновляем ТОЛЬКО уже существующие в профиле записи dailyTrials (без добавления чужих ID!)
         val trials = profile.optJSONArray("dailyTrials")
         if (trials != null) {
             for (i in 0 until trials.length()) {
@@ -641,36 +635,6 @@ object CryptoAndSyncManager {
             }
         }
         profile.put("missionProgresses", missions)
-    }
-
-    fun patchGameConfigsViaShizuku(cacheDir: File, log: (String) -> Unit): String {
-        val (_, findOut) = execSh("find /storage/emulated/0/Android/data/$PKG_CITY -name 'manifest.json' 2>/dev/null | head -n 1")
-        val manifestPath = findOut.trim()
-        if (manifestPath.isEmpty()) {
-            val msg = "ℹ️ Кэш manifest.json не найден. Все читы применены напрямую в профиль!"
-            log(msg)
-            return msg
-        }
-        val configDir = File(manifestPath).parent ?: return "Ошибка пути"
-        val manifestBytes = readFileViaShizuku(manifestPath, log) ?: return "Не удалось прочитать manifest.json"
-        val manifestJson = JSONObject(String(manifestBytes, Charsets.UTF_8))
-        val objects = manifestJson.optJSONObject("objects") ?: return "Неверный формат manifest.json"
-
-        val ticketJson = """{"maxTicket":999,"regenerationCooldownInSeconds":1,"ticketCostPerPlay":0}"""
-        patchSingleConfig(configDir, objects, "campaignTicketingConfig", "campaignTicketingConfig.json", ticketJson, log)
-
-        val noAdsJson = """{"configurations":[{"countryTier":3,"minimumPlayerLevelToDisplayInterstitial":999,"rewardedVideoAdCooldown":0,"maximumCapacity":0,"coolDownBetweenInterstitials":999999,"minimumRunNumber":99999,"skipInterstitialIfRVInLastRun":true,"percentageFirstInterstitial":0,"percentageAfterFirstInterstitial":0}]}"""
-        patchSingleConfig(configDir, objects, "interstitials", "interstitials.json", noAdsJson, log)
-
-        writeFileViaShizuku(manifestPath, manifestJson.toString().toByteArray(Charsets.UTF_8), log)
-        return "✅ Конфиги пропатчены, SHA-1 ключи в manifest.json обновлены!"
-    }
-
-    private fun patchSingleConfig(configDir: String, objects: JSONObject, keyName: String, fileName: String, content: String, log: (String) -> Unit) {
-        val bytes = content.toByteArray(Charsets.UTF_8)
-        val sha1 = MessageDigest.getInstance("SHA-1").digest(bytes).joinToString("") { "%02x".format(it) }
-        writeFileViaShizuku("$configDir/$fileName", bytes, log)
-        objects.optJSONObject(keyName)?.put("key", sha1)
     }
 
     fun upsertCounter(counters: JSONArray, type: String, id: String, count: Int) {
