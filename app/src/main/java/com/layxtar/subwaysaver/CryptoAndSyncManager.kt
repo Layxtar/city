@@ -17,15 +17,16 @@ import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
 // Модель состояния отдельного сёрфера в Subway Surfers City
+// Модель состояния отдельного сёрфера в Subway Surfers City (без ранга опыта)
 data class CitySurferState(
     val id: Long,
     val name: String,
     var isUnlocked: Boolean,
     var level: Int,
     var highScore: Long,
-    var tierRank: Int,
     var selectedSkin: Int
 )
+
 
 // Модель состояния отдельной доски в Subway Surfers City
 data class CityBoardState(
