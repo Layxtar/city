@@ -22,7 +22,8 @@ data class CitySurferState(
     var isUnlocked: Boolean,
     var level: Int,
     var highScore: Long,
-    var selectedSkin: Int
+    var selectedSkin: Int,
+    val availableSkins: List<Pair<Int, String>>
 )
 
 data class CityBoardState(
@@ -50,19 +51,19 @@ object CryptoAndSyncManager {
 
     fun registerPermissionListener() {
         if (!listenerRegistered) {
-            try {
+            runCatching {
                 Shizuku.addRequestPermissionResultListener(permissionListener)
                 listenerRegistered = true
-            } catch (_: Exception) {}
+            }
         }
     }
 
     fun unregisterPermissionListener() {
         if (listenerRegistered) {
-            try {
+            runCatching {
                 Shizuku.removeRequestPermissionResultListener(permissionListener)
                 listenerRegistered = false
-            } catch (_: Exception) {}
+            }
         }
     }
 
@@ -76,14 +77,20 @@ object CryptoAndSyncManager {
         if (isServiceRunning()) {
             Shizuku.requestPermission(42)
         } else {
-            val intent = context.packageManager?.getLaunchIntentForPackage(PKG_SHIZUKU)
-            if (intent != null) context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            context.packageManager?.getLaunchIntentForPackage(PKG_SHIZUKU)?.let {
+                context.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
         }
     }
 
     fun execSh(command: String, log: ((String) -> Unit)? = null): Pair<Int, String> {
         return try {
-            val method = Shizuku::class.java.getDeclaredMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
+            val method = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java
+            )
             method.isAccessible = true
             val process = method.invoke(null, arrayOf("sh", "-c", command), null, null) as Process
             val output = process.inputStream.bufferedReader().readText()
@@ -216,120 +223,237 @@ object CryptoAndSyncManager {
         }
     }
 
+    // ==================== БЕРЕЖНЫЙ ПАРСИНГ И СОХРАНЕНИЕ СЁРФЕРОВ И ДОСОК CITY ====================
+    // Читает как известные из GameDatabase.SURFERS, так и ВСЕ реальные объекты из твоего сохранения!
     fun parseCitySurfers(profile: JSONObject): List<CitySurferState> {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
-        val map = mutableMapOf<Long, JSONObject>()
+        val mapInSave = LinkedHashMap<Long, JSONObject>()
         for (i in 0 until currentArray.length()) {
             val obj = currentArray.getJSONObject(i)
-            map[obj.getLong("id")] = obj
+            mapInSave[obj.getLong("id")] = obj
         }
-        return GameDatabase.SURFERS.map { (id, name) ->
-            val obj = map[id]
-            CitySurferState(
-                id = id,
-                name = name,
-                isUnlocked = obj?.optBoolean("isUnlocked", false) ?: false,
-                level = obj?.optInt("level", 1) ?: 1,
-                highScore = obj?.optLong("highScore", 0L) ?: 0L,
-                selectedSkin = obj?.optInt("selectedSkin", 0) ?: 0
+
+        val result = mutableListOf<CitySurferState>()
+        val processedIds = mutableSetOf<Long>()
+
+        // 1. Сначала проходим по базе GameDatabase.SURFERS
+        for ((id, name) in GameDatabase.SURFERS) {
+            processedIds.add(id)
+            val obj = mapInSave[id]
+            val skins = GameDatabase.getSkinsForSurfer(id, name)
+            result.add(
+                CitySurferState(
+                    id = id,
+                    name = name,
+                    isUnlocked = obj?.optBoolean("isUnlocked", false) ?: false,
+                    level = obj?.optInt("level", 1) ?: 1,
+                    highScore = obj?.optLong("highScore", 0L) ?: 0L,
+                    selectedSkin = obj?.optInt("selectedSkin", 0) ?: 0,
+                    availableSkins = skins
+                )
             )
         }
+
+        // 2. Если в сохранении есть персонажи с другими ID (чтобы ни один открытый персонаж не потерялся!), добавляем их тоже
+        for ((id, obj) in mapInSave) {
+            if (processedIds.add(id)) {
+                val label = "Сёрфер ID: $id"
+                result.add(
+                    CitySurferState(
+                        id = id,
+                        name = label,
+                        isUnlocked = obj.optBoolean("isUnlocked", true),
+                        level = obj.optInt("level", 1),
+                        highScore = obj.optLong("highScore", 0L),
+                        selectedSkin = obj.optInt("selectedSkin", 0),
+                        availableSkins = GameDatabase.getSkinsForSurfer(id, label)
+                    )
+                )
+            }
+        }
+        return result
     }
 
+    // Обновляет surferProfiles на месте, НЕ удаляя никаких существующих полей из сохранения!
     fun applyCitySurfers(profile: JSONObject, states: List<CitySurferState>) {
-        val newArray = JSONArray()
+        val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
+        val existingObjects = LinkedHashMap<Long, JSONObject>()
+        for (i in 0 until currentArray.length()) {
+            val obj = currentArray.getJSONObject(i)
+            existingObjects[obj.getLong("id")] = obj
+        }
+
         for (s in states) {
-            if (s.isUnlocked || s.highScore > 0 || s.level > 1) {
-                newArray.put(JSONObject().apply {
+            val existing = existingObjects[s.id]
+            if (existing != null) {
+                existing.put("isUnlocked", s.isUnlocked)
+                existing.put("level", s.level.coerceIn(1, 20))
+                existing.put("highScore", s.highScore)
+                existing.put("selectedSkin", s.selectedSkin)
+                if (s.isUnlocked) existing.put("wasSeen", true)
+            } else if (s.isUnlocked || s.highScore > 0 || s.level > 1) {
+                existingObjects[s.id] = JSONObject().apply {
                     put("id", s.id)
                     put("level", s.level.coerceIn(1, 20))
                     put("isUnlocked", s.isUnlocked)
                     put("wasSeen", true)
                     put("highScore", s.highScore)
                     put("selectedSkin", s.selectedSkin)
-                })
+                }
             }
         }
-        profile.put("surferProfiles", newArray)
+
+        val outArray = JSONArray()
+        for ((_, obj) in existingObjects) outArray.put(obj)
+        profile.put("surferProfiles", outArray)
     }
 
     fun parseCityBoards(profile: JSONObject): List<CityBoardState> {
         val currentArray = profile.optJSONArray("boardProfiles") ?: JSONArray()
-        val map = mutableMapOf<Long, JSONObject>()
+        val mapInSave = LinkedHashMap<Long, JSONObject>()
         for (i in 0 until currentArray.length()) {
             val obj = currentArray.getJSONObject(i)
-            map[obj.getLong("id")] = obj
+            mapInSave[obj.getLong("id")] = obj
         }
-        return GameDatabase.BOARDS.map { (id, name) ->
-            val obj = map[id]
-            CityBoardState(
-                id = id,
-                name = name,
-                isUnlocked = obj?.optBoolean("isUnlocked", false) ?: false,
-                level = obj?.optInt("level", 1) ?: 1
+
+        val result = mutableListOf<CityBoardState>()
+        val processedIds = mutableSetOf<Long>()
+
+        for ((id, name) in GameDatabase.BOARDS) {
+            processedIds.add(id)
+            val obj = mapInSave[id]
+            result.add(
+                CityBoardState(
+                    id = id,
+                    name = name,
+                    isUnlocked = obj?.optBoolean("isUnlocked", false) ?: false,
+                    level = obj?.optInt("level", 1) ?: 1
+                )
             )
         }
+
+        for ((id, obj) in mapInSave) {
+            if (processedIds.add(id)) {
+                result.add(
+                    CityBoardState(
+                        id = id,
+                        name = "Доска ID: $id",
+                        isUnlocked = obj.optBoolean("isUnlocked", true),
+                        level = obj.optInt("level", 1)
+                    )
+                )
+            }
+        }
+        return result
     }
 
     fun applyCityBoards(profile: JSONObject, states: List<CityBoardState>) {
-        val newArray = JSONArray()
+        val currentArray = profile.optJSONArray("boardProfiles") ?: JSONArray()
+        val existingObjects = LinkedHashMap<Long, JSONObject>()
+        for (i in 0 until currentArray.length()) {
+            val obj = currentArray.getJSONObject(i)
+            existingObjects[obj.getLong("id")] = obj
+        }
+
         for (b in states) {
-            if (b.isUnlocked || b.level > 1) {
-                newArray.put(JSONObject().apply {
+            val existing = existingObjects[b.id]
+            if (existing != null) {
+                existing.put("isUnlocked", b.isUnlocked)
+                existing.put("level", b.level.coerceIn(1, 20))
+                if (b.isUnlocked) existing.put("wasSeen", true)
+            } else if (b.isUnlocked || b.level > 1) {
+                existingObjects[b.id] = JSONObject().apply {
                     put("id", b.id)
                     put("level", b.level.coerceIn(1, 20))
                     put("isUnlocked", b.isUnlocked)
                     put("wasSeen", true)
-                })
+                }
             }
         }
-        profile.put("boardProfiles", newArray)
+
+        val outArray = JSONArray()
+        for ((_, obj) in existingObjects) outArray.put(obj)
+        profile.put("boardProfiles", outArray)
     }
 
     fun unlockAndMaxAllSurfers(profile: JSONObject) {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
-        val existingSkins = mutableMapOf<Long, Int>()
-        val existingScores = mutableMapOf<Long, Long>()
+        val existingObjects = LinkedHashMap<Long, JSONObject>()
         for (i in 0 until currentArray.length()) {
             val obj = currentArray.getJSONObject(i)
-            existingSkins[obj.getLong("id")] = obj.optInt("selectedSkin", 0)
-            existingScores[obj.getLong("id")] = obj.optLong("highScore", 0L)
+            val id = obj.getLong("id")
+            obj.put("level", 20)
+            obj.put("isUnlocked", true)
+            obj.put("wasSeen", true)
+            existingObjects[id] = obj
+        }
+        for ((id, _) in GameDatabase.SURFERS) {
+            if (!existingObjects.containsKey(id)) {
+                existingObjects[id] = JSONObject().apply {
+                    put("id", id)
+                    put("level", 20)
+                    put("isUnlocked", true)
+                    put("wasSeen", true)
+                    put("highScore", 0L)
+                    put("selectedSkin", 0)
+                }
+            }
         }
         val newArray = JSONArray()
-        for ((id, _) in GameDatabase.SURFERS) {
-            newArray.put(JSONObject().apply {
-                put("id", id)
-                put("level", 20)
-                put("isUnlocked", true)
-                put("wasSeen", true)
-                put("highScore", existingScores[id] ?: 0L)
-                put("selectedSkin", existingSkins[id] ?: 0)
-            })
-        }
+        for ((_, obj) in existingObjects) newArray.put(obj)
         profile.put("surferProfiles", newArray)
     }
 
     fun unlockAndMaxAllBoards(profile: JSONObject) {
-        val newArray = JSONArray()
-        for ((id, _) in GameDatabase.BOARDS) {
-            newArray.put(JSONObject().put("id", id).put("level", 20).put("isUnlocked", true).put("wasSeen", true))
+        val currentArray = profile.optJSONArray("boardProfiles") ?: JSONArray()
+        val existingObjects = LinkedHashMap<Long, JSONObject>()
+        for (i in 0 until currentArray.length()) {
+            val obj = currentArray.getJSONObject(i)
+            val id = obj.getLong("id")
+            obj.put("level", 20)
+            obj.put("isUnlocked", true)
+            obj.put("wasSeen", true)
+            existingObjects[id] = obj
         }
+        for ((id, _) in GameDatabase.BOARDS) {
+            if (!existingObjects.containsKey(id)) {
+                existingObjects[id] = JSONObject().put("id", id).put("level", 20).put("isUnlocked", true).put("wasSeen", true)
+            }
+        }
+        val newArray = JSONArray()
+        for ((_, obj) in existingObjects) newArray.put(obj)
         profile.put("boardProfiles", newArray)
     }
 
-    // Разблокировка ВСЕХ скинов (костюмов) и аватарок для City
+    // Бережная разблокировка всех скинов и аватаров (сохраняет все существующие в профиле ID скинов + добавляет из базы)
     fun unlockAllSkinsAndAvatars(profile: JSONObject) {
-        val skinsArray = JSONArray()
+        val curSkins = profile.optJSONArray("surferSkinProfiles") ?: JSONArray()
+        val skinMap = LinkedHashMap<Any, JSONObject>()
+        for (i in 0 until curSkins.length()) {
+            val obj = curSkins.getJSONObject(i)
+            val idKey = obj.opt("id") ?: continue
+            obj.put("isUnlocked", true)
+            obj.put("wasSeen", true)
+            skinMap[idKey] = obj
+        }
         for (skinId in GameDatabase.ALL_SKINS) {
-            skinsArray.put(JSONObject().put("id", skinId).put("isUnlocked", true).put("wasSeen", true))
+            if (!skinMap.containsKey(skinId)) {
+                skinMap[skinId] = JSONObject().put("id", skinId).put("isUnlocked", true).put("wasSeen", true)
+            }
         }
-        profile.put("surferSkinProfiles", skinsArray)
+        val skinsOut = JSONArray()
+        for ((_, obj) in skinMap) skinsOut.put(obj)
+        profile.put("surferSkinProfiles", skinsOut)
 
-        val avatarsArray = JSONArray()
-        for (avatarId in GameDatabase.ALL_AVATARS) {
-            avatarsArray.put(JSONObject().put("id", avatarId))
+        val curAvatars = profile.optJSONArray("avatarProfiles") ?: JSONArray()
+        val avSet = mutableSetOf<Any>()
+        for (i in 0 until curAvatars.length()) {
+            curAvatars.getJSONObject(i).opt("id")?.let { avSet.add(it) }
         }
-        profile.put("avatarProfiles", avatarsArray)
+        for (avatarId in GameDatabase.ALL_AVATARS) {
+            if (avSet.add(avatarId)) curAvatars.put(JSONObject().put("id", avatarId))
+        }
+        profile.put("avatarProfiles", curAvatars)
     }
 
     fun completeAllDistrictsAndStages(profile: JSONObject) {
@@ -347,7 +471,11 @@ object CryptoAndSyncManager {
 
         val goals = profile.optJSONArray("goals") ?: JSONArray()
         val existingGoalIds = mutableSetOf<String>()
-        for (i in 0 until goals.length()) existingGoalIds.add(goals.getJSONObject(i).getString("id"))
+        for (i in 0 until goals.length()) {
+            val g = goals.getJSONObject(i)
+            g.put("completed", true)
+            existingGoalIds.add(g.getString("id"))
+        }
         val stageCounts = mapOf(1 to 32, 2 to 36, 3 to 36, 4 to 36, 5 to 36, 6 to 20)
         for ((districtNum, maxStage) in stageCounts) {
             for (stage in 1..maxStage) {
