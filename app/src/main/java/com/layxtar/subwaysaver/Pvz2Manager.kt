@@ -14,9 +14,7 @@ object Pvz2Manager {
         for (pkg in PACKAGES) {
             val path = "/storage/emulated/0/Android/data/$pkg/files/No_Backup"
             val (_, out) = CryptoAndSyncManager.execSh("if [ -d '$path' ]; then echo 'FOUND'; fi")
-            if (out.contains("FOUND")) {
-                return pkg to path
-            }
+            if (out.contains("FOUND")) return pkg to path
         }
         val defaultPkg = Pvz2Database.PKG_PVZ2_ROW
         return defaultPkg to "/storage/emulated/0/Android/data/$defaultPkg/files/No_Backup"
@@ -28,11 +26,11 @@ object Pvz2Manager {
         val (_, out) = CryptoAndSyncManager.execSh(cmd)
         val found = out.trim()
         if (found.isNotEmpty()) {
-            log("🌻 Найдена актуальная папка кэша: $found")
+            log("🌻 Найдена папка кэша: $found")
             return found
         }
         val fallback = "$noBackup/CDN.13.5"
-        log("⚠️ Папка CDN.* не найдена автоматически, используем: $fallback")
+        log("⚠️ Папка CDN.* не найдена, используем: $fallback")
         return fallback
     }
 
@@ -52,7 +50,7 @@ object Pvz2Manager {
                 RtonConverter.rtonToJson(rawBytes)
             }
         } catch (e: Exception) {
-            log("❌ Ошибка декодирования RTON ($fullPath): ${e.message}")
+            log("❌ Ошибка чтения RTON ($fullPath): ${e.message}")
             null
         }
     }
@@ -63,10 +61,10 @@ object Pvz2Manager {
         return try {
             val rtonBytes = RtonConverter.jsonToRton(json)
             val ok = CryptoAndSyncManager.writeFileViaShizuku(fullPath, rtonBytes, log)
-            if (ok) log("✅ Записан RTON (${rtonBytes.size} байт): $fullPath")
+            if (ok) log("✅ Записан RTON: ${fullPath.substringAfterLast("/")}")
             ok
         } catch (e: Exception) {
-            log("❌ Ошибка упаковки RTON ($fullPath): ${e.message}")
+            log("❌ Ошибка записи RTON ($fullPath): ${e.message}")
             false
         }
     }
@@ -76,12 +74,7 @@ object Pvz2Manager {
         return "$noBackup/pp.dat"
     }
 
-    fun loadPlayerSavePpDat(log: (String) -> Unit): JSONObject? {
-        val path = getPpDatPath()
-        val json = readRtonAsJson(path, log)
-        if (json != null) log("✅ Сохранение pp.dat успешно расшифровано!")
-        return json
-    }
+    fun loadPlayerSavePpDat(log: (String) -> Unit): JSONObject? = readRtonAsJson(getPpDatPath(), log)
 
     private fun findPlayerDataObject(ppJson: JSONObject): JSONObject {
         val objects = ppJson.optJSONArray("objects")
@@ -119,9 +112,7 @@ object Pvz2Manager {
         log: (String) -> Unit
     ): Boolean {
         val data = findPlayerDataObject(ppJson)
-        for ((k, v) in currencies) {
-            data.put(k, v)
-        }
+        for ((k, v) in currencies) data.put(k, v)
 
         if (unlockAllPlants) {
             val plObj = data.optJSONObject("pl") ?: JSONObject()
@@ -138,7 +129,7 @@ object Pvz2Manager {
         return writeJsonAsRton(getPpDatPath(), ppJson, log)
     }
 
-    // ==================== ПРИНУДИТЕЛЬНЫЙ ПАТЧ МАГАЗИНА И ВВЕДЕНИЕ ВСЕХ ТОВАРОВ НА ВИТРИНУ ====================
+    // ==================== НАСИЛЬНОЕ ВНЕДРЕНИЕ НА ВИТРИНУ МАГАЗИНА ====================
 
     fun patchShopAllFor1CoinAndInjectSeeds(
         cdnDir: String,
@@ -148,180 +139,224 @@ object Pvz2Manager {
         log: (String) -> Unit
     ): Boolean {
         val productsPath = "$cdnDir/products.rton"
-        val marketLayoutPath = "$cdnDir/market_layout.rton"
         val marketSchedPath = "$cdnDir/market_schedule.rton"
+        val marketLayoutPath = "$cdnDir/market_layout.rton"
+        val magentoPath = "$cdnDir/magento_filter.rton"
 
-        // 1. Патчим products.rton: переводим всё на 1 монету + генерируем товары для абсолютно каждого растения и скина
-        val productsJson = readRtonAsJson(productsPath, log)
-        if (productsJson != null) {
-            val objects = productsJson.optJSONArray("objects") ?: JSONArray()
-            val allSkus = mutableListOf<String>()
+        val productsJson = readRtonAsJson(productsPath, log) ?: return false
+        val schedJson = readRtonAsJson(marketSchedPath, log) ?: return false
+        val layoutJson = readRtonAsJson(marketLayoutPath, log) ?: return false
 
-            for (i in 0 until objects.length()) {
-                val obj = objects.getJSONObject(i)
-                val objData = obj.optJSONObject("objdata") ?: continue
-
-                objData.put("PriceCoins", 1)
-                objData.put("PriceGems", 0)
-                objData.put("PriceMints", 0)
-                objData.put("Price", 0.0)
-                objData.put("IsFree", false)
-                objData.put("CurrencyType", "Coins")
-
-                val sku = objData.optString("Sku")
-                if (sku.isNotEmpty()) allSkus.add(sku)
-            }
-
-            // Добавляем кастомный товар с выбранным количеством семян (от 1 до 1 000 000)
-            val customSku = "editor_seed_${selectedPlantId}_$seedAmount"
-            allSkus.add(customSku)
-            objects.put(JSONObject().apply {
-                put("aliases", JSONArray().put(customSku))
-                put("objclass", "ProductProps")
-                put("objdata", JSONObject().apply {
-                    put("Sku", customSku)
-                    put("ObjectType", selectedPlantId)
-                    put("ObjectCount", seedAmount)
-                    put("PriceCoins", 1)
-                    put("PriceGems", 0)
-                    put("CurrencyType", "Coins")
-                    put("IsAdPlacement", false)
-                })
-            })
-
-            // Если включено — создаем товары для вообще всех растений из базы данных
-            if (unlockAllPlantsAndSkinsInShop) {
-                for ((plantId, _) in Pvz2Database.PLANTS) {
-                    val plantSku = "editor_unlock_$plantId"
-                    allSkus.add(plantSku)
-                    objects.put(JSONObject().apply {
-                        put("aliases", JSONArray().put(plantSku))
-                        put("objclass", "ProductProps")
-                        put("objdata", JSONObject().apply {
-                            put("Sku", plantSku)
-                            put("ObjectType", plantId)
-                            put("ObjectCount", maxOf(seedAmount, 250))
-                            put("PriceCoins", 1)
-                            put("PriceGems", 0)
-                            put("CurrencyType", "Coins")
-                        })
-                    })
-                }
-            }
-
-            productsJson.put("objects", objects)
-            writeJsonAsRton(productsPath, productsJson, log)
-
-            // 2. ПРИНУДИТЕЛЬНО ПРОПИСЫВАЕМ ВСЕ SKUs НА ГЛАВНУЮ ВИТРИНУ (market_layout.rton)
-            val layoutJson = readRtonAsJson(marketLayoutPath, log)
-            if (layoutJson != null) {
-                forceInjectSkusToLayoutAndSchedule(layoutJson, allSkus)
-                writeJsonAsRton(marketLayoutPath, layoutJson, log)
-            }
-
-            // 3. ПРИНУДИТЕЛЬНО АКТИВИРОВАТЬ РАСПИСАНИЕ МАГАЗИНА (market_schedule.rton)
-            val schedJson = readRtonAsJson(marketSchedPath, log)
-            if (schedJson != null) {
-                forceInjectSkusToLayoutAndSchedule(schedJson, allSkus)
-                writeJsonAsRton(marketSchedPath, schedJson, log)
-            }
-        } else {
-            log("⚠️ Файл products.rton не найден в кэше!")
-            return false
-        }
-
-        log("🛒 Магазин PvZ 2 полностью принудительно обновлен: всё по 1 монете + семена ($seedAmount шт.) на витрине!")
-        return true
-    }
-
-    private fun forceInjectSkusToLayoutAndSchedule(node: Any?, allSkus: List<String>) {
-        when (node) {
-            is JSONObject -> {
-                val keys = node.keys().asSequence().toList()
-                for (k in keys) {
-                    val v = node.opt(k)
-                    if (k.equals("SoftCost", ignoreCase = true) || k.equals("PriceCoins", ignoreCase = true) || k.equals("Cost", ignoreCase = true)) {
-                        if (v is Number) node.put(k, 1)
-                    }
-                    if (k.equals("Products", ignoreCase = true) || k.equals("Items", ignoreCase = true) || k.equals("Offers", ignoreCase = true)) {
-                        if (v is JSONArray) {
-                            // Внедряем абсолютно все SKU в массивы витрины, чтобы игра обязана была их показать
-                            for (sku in allSkus) {
-                                var exists = false
-                                for (i in 0 until v.length()) {
-                                    if (v.optString(i) == sku || v.optJSONObject(i)?.optString("Sku") == sku) {
-                                        exists = true
-                                        break
-                                    }
-                                }
-                                if (!exists) {
-                                    v.put(sku)
-                                }
+        // 1. Патчим magento_filter.rton (разрешаем показ всех растений и скинов)
+        readRtonAsJson(magentoPath, log)?.let { magento ->
+            val objs = magento.optJSONArray("objects")
+            if (objs != null && objs.length() > 0) {
+                val filters = objs.getJSONObject(0).optJSONObject("objdata")?.optJSONArray("ObjectTypeFilters")
+                if (filters != null) {
+                    for (i in 0 until filters.length()) {
+                        val f = filters.getJSONObject(i)
+                        if (f.optString("Type") == "plant") {
+                            val sub = f.optJSONArray("SubTypeFilters") ?: JSONArray()
+                            val set = mutableSetOf<String>()
+                            for (j in 0 until sub.length()) set.add(sub.getString(j))
+                            for ((pId, _) in Pvz2Database.PLANTS) {
+                                if (set.add(pId)) sub.put(pId)
                             }
+                            f.put("SubTypeFilters", sub)
                         }
                     }
-                    forceInjectSkusToLayoutAndSchedule(v, allSkus)
                 }
             }
-            is JSONArray -> {
-                for (i in 0 until node.length()) {
-                    forceInjectSkusToLayoutAndSchedule(node.opt(i), allSkus)
+            writeJsonAsRton(magentoPath, magento, log)
+        }
+
+        // 2. В products.rton создаём позиции на 1 монету
+        val pObjects = productsJson.optJSONArray("objects") ?: JSONArray()
+        val allPlantSkus = mutableListOf<String>()
+        val allSeedSkus = mutableListOf<String>()
+
+        // Создаём товар для выбранного семени
+        val customSeedSku = "editor.SeedPacket.$selectedPlantId.$seedAmount"
+        allSeedSkus.add(customSeedSku)
+        pObjects.put(JSONObject().apply {
+            put("aliases", JSONArray().put(customSeedSku))
+            put("objclass", "StoreProductProps")
+            put("objdata", JSONObject().apply {
+                put("IsFree", false)
+                put("IsOneTimePurchase", false)
+                put("Name", "Seed - $selectedPlantId x$seedAmount")
+                put("ObjectCount", seedAmount)
+                put("ObjectItem", selectedPlantId)
+                put("ObjectType", "seedpacket")
+                put("PriceCoins", "1")
+                put("Sku", customSeedSku)
+            })
+        })
+
+        if (unlockAllPlantsAndSkinsInShop) {
+            for ((pId, pName) in Pvz2Database.PLANTS) {
+                // Прямой анлок растения
+                val plantSku = "editor.Plant.$pId"
+                allPlantSkus.add(plantSku)
+                pObjects.put(JSONObject().apply {
+                    put("aliases", JSONArray().put(plantSku))
+                    put("objclass", "StoreProductProps")
+                    put("objdata", JSONObject().apply {
+                        put("IsFree", false)
+                        put("IsOneTimePurchase", false)
+                        put("Name", "Plant - $pName")
+                        put("ObjectCount", 1)
+                        put("ObjectItem", pId)
+                        put("ObjectType", "plant")
+                        put("PriceCoins", "1")
+                        put("Sku", plantSku)
+                    })
+                })
+
+                // Пакет семян на 10 000 шт. для каждого растения
+                val seedSku = "editor.SeedPacket.$pId.10000"
+                allSeedSkus.add(seedSku)
+                pObjects.put(JSONObject().apply {
+                    put("aliases", JSONArray().put(seedSku))
+                    put("objclass", "StoreProductProps")
+                    put("objdata", JSONObject().apply {
+                        put("IsFree", false)
+                        put("IsOneTimePurchase", false)
+                        put("Name", "Seed - $pName x10000")
+                        put("ObjectCount", 10000)
+                        put("ObjectItem", pId)
+                        put("ObjectType", "seedpacket")
+                        put("PriceCoins", "1")
+                        put("Sku", seedSku)
+                    })
+                })
+            }
+
+            // Добавляем все 342 скина (костюма)
+            for (cNum in 1..342) {
+                val cSku = "editor.Costume.$cNum"
+                pObjects.put(JSONObject().apply {
+                    put("aliases", JSONArray().put(cSku))
+                    put("objclass", "StoreProductProps")
+                    put("objdata", JSONObject().apply {
+                        put("IsFree", false)
+                        put("IsOneTimePurchase", false)
+                        put("Name", "Costume $cNum")
+                        put("ObjectCount", 1)
+                        put("ObjectItem", cNum.toString())
+                        put("ObjectType", "costume")
+                        put("PriceCoins", "1")
+                        put("Sku", cSku)
+                    })
+                })
+            }
+        }
+
+        // Обнуляем стоимость всех остальных существующих товаров на 1 монету
+        for (i in 0 until pObjects.length()) {
+            val d = pObjects.getJSONObject(i).optJSONObject("objdata") ?: continue
+            d.put("PriceCoins", "1")
+            d.put("PriceGems", 0)
+            d.put("Price", 0.0)
+            d.put("IsFree", false)
+        }
+        productsJson.put("objects", pObjects)
+        writeJsonAsRton(productsPath, productsJson, log)
+
+        // 3. НАСИЛЬНО ВНЕДРЯЕМ В market_schedule.rton (в секцию "Plants", "Seeds", "Bundles")
+        val schedObjs = schedJson.optJSONArray("objects")
+        if (schedObjs != null && schedObjs.length() > 0) {
+            val entries = schedObjs.getJSONObject(0).optJSONObject("objdata")?.optJSONArray("MarketScheduleEntries")
+            if (entries != null) {
+                // Создаём принудительную постоянную секцию "Editor Plants & Seeds"
+                val newScheduledProducts = JSONArray()
+
+                for (sku in allPlantSkus) {
+                    newScheduledProducts.put(JSONObject().apply {
+                        put("Category", "Plants")
+                        put("SoftCurrency", "Coins")
+                        put("SoftCost", 1)
+                        put("MaxPurchase", -1)
+                        put("Visuals", "RTID(0)")
+                        put("Sku", JSONArray().put(sku).put(sku))
+                    })
+                }
+                for (sku in allSeedSkus) {
+                    newScheduledProducts.put(JSONObject().apply {
+                        put("Category", "Seeds")
+                        put("SoftCurrency", "Coins")
+                        put("SoftCost", 1)
+                        put("MaxPurchase", -1)
+                        put("Visuals", "RTID(0)")
+                        put("Sku", JSONArray().put(sku).put(sku))
+                    })
+                }
+
+                entries.put(JSONObject().apply {
+                    put("Name", "EditorAllPlantsAndSeeds")
+                    put("StartDateTime", 0)
+                    put("EndDateTime", 0)
+                    put("ScheduledProducts", newScheduledProducts)
+                })
+            }
+        }
+        writeJsonAsRton(marketSchedPath, schedJson, log)
+
+        // 4. Патчим market_layout.rton (активируем вкладки витрины)
+        val layoutObjs = layoutJson.optJSONArray("objects")
+        if (layoutObjs != null && layoutObjs.length() > 0) {
+            val markets = layoutObjs.getJSONObject(0).optJSONObject("objdata")?.optJSONArray("Markets")
+            if (markets != null && markets.length() > 0) {
+                val mainClusters = markets.getJSONObject(0).optJSONArray("Clusters")
+                if (mainClusters != null) {
+                    val needed = listOf("Promotions", "Plants", "Seeds", "Costumes", "Bundles", "Pinatas")
+                    val existing = mutableSetOf<String>()
+                    for (i in 0 until mainClusters.length()) existing.add(mainClusters.getString(i))
+                    for (c in needed) {
+                        if (existing.add(c)) mainClusters.put(c)
+                    }
                 }
             }
         }
+        writeJsonAsRton(marketLayoutPath, layoutJson, log)
+
+        log("🛒 Насильный инжект завершён: все растения, семена и скины выставлены на витрину за 1🪙!")
+        return true
     }
 
     fun patchPinataCoreLoot(cdnDir: String, multiplier: Int, minSeedsPerSlot: Int, log: (String) -> Unit): Boolean {
         val path = "$cdnDir/pinatacoreloot.rton"
-        val json = readRtonAsJson(path, log) ?: run {
-            log("❌ Файл $path не найден!")
-            return false
-        }
-        boostPinataLootRecursively(json, multiplier, minSeedsPerSlot)
-        val ok = writeJsonAsRton(path, json, log)
-        if (ok) log("🪅 Лут пиньят увеличен в x$multiplier раз!")
-        return ok
-    }
-
-    private fun boostPinataLootRecursively(node: Any?, mult: Int, minSeeds: Int) {
-        when (node) {
-            is JSONObject -> {
-                val keys = node.keys().asSequence().toList()
-                for (k in keys) {
-                    val v = node.opt(k)
-                    if (v is Number) {
-                        val lowKey = k.lowercase()
-                        if (lowKey.contains("min") || lowKey.contains("max") || lowKey.contains("amount") || lowKey.contains("count")) {
-                            if (!lowKey.contains("slot") && !lowKey.contains("weight")) {
-                                node.put(k, maxOf(v.toInt() * mult, minSeeds))
-                            }
-                        }
-                    } else {
-                        boostPinataLootRecursively(v, mult, minSeeds)
-                    }
+        val json = readRtonAsJson(path, log) ?: return false
+        val objs = json.optJSONArray("objects")
+        if (objs != null && objs.length() > 0) {
+            val slotConfigs = objs.getJSONObject(0).optJSONObject("objdata")?.optJSONObject("SlotConfigs")
+            if (slotConfigs != null) {
+                val keys = slotConfigs.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val cfg = slotConfigs.getJSONObject(k)
+                    val slots = cfg.optJSONArray("Slots") ?: JSONArray()
+                    // Расширяем до 20 слотов семян
+                    while (slots.length() < 20) slots.put("PlantXP")
+                    cfg.put("Slots", slots)
+                    cfg.put("PercentPinataAward", 1)
                 }
             }
-            is JSONArray -> {
-                for (i in 0 until node.length()) boostPinataLootRecursively(node.opt(i), mult, minSeeds)
-            }
         }
+        return writeJsonAsRton(path, json, log)
     }
 
     fun patchZeroSunAndInstantCooldown(cdnDir: String, log: (String) -> Unit): Boolean {
-        val propsPath = "$cdnDir/PlantProperties.rton"
-        val levelsPath = "$cdnDir/PlantLevels.rton"
-        var anyPatched = false
-
-        readRtonAsJson(propsPath, log)?.let { json ->
-            zeroSunRecursively(json)
-            if (writeJsonAsRton(propsPath, json, log)) anyPatched = true
+        var ok = true
+        readRtonAsJson("$cdnDir/PlantProperties.rton", log)?.let { j ->
+            zeroSunRecursively(j)
+            ok = ok and writeJsonAsRton("$cdnDir/PlantProperties.rton", j, log)
         }
-        readRtonAsJson(levelsPath, log)?.let { json ->
-            zeroSunRecursively(json)
-            if (writeJsonAsRton(levelsPath, json, log)) anyPatched = true
+        readRtonAsJson("$cdnDir/PlantLevels.rton", log)?.let { j ->
+            zeroSunRecursively(j)
+            ok = ok and writeJsonAsRton("$cdnDir/PlantLevels.rton", j, log)
         }
-        if (anyPatched) log("🌞 Мод активирован: Все растения стоят 0 солнца и перезаряжаются мгновенно!")
-        return anyPatched
+        return ok
     }
 
     private fun zeroSunRecursively(node: Any?) {
@@ -330,11 +365,7 @@ object Pvz2Manager {
                 val keys = node.keys().asSequence().toList()
                 for (k in keys) {
                     val v = node.opt(k)
-                    if (k.equals("Cost", ignoreCase = true) || k.equals("SunCost", ignoreCase = true)) {
-                        if (v is Number) node.put(k, 0)
-                        if (v is JSONArray) { for (i in 0 until v.length()) v.put(i, 0) }
-                    }
-                    if (k.equals("PacketCooldown", ignoreCase = true) || k.equals("Cooldown", ignoreCase = true)) {
+                    if (k.equals("Cost", true) || k.equals("SunCost", true) || k.equals("Cooldown", true) || k.equals("PacketCooldown", true)) {
                         if (v is Number) node.put(k, 0)
                         if (v is JSONArray) { for (i in 0 until v.length()) v.put(i, 0) }
                     }
@@ -348,42 +379,31 @@ object Pvz2Manager {
     }
 
     fun patchArenaAndCalendarMegaRewards(cdnDir: String, log: (String) -> Unit): Boolean {
-        val filesToBoost = listOf(
-            "joust_crownrewards.rton", "joust_progressiverewards.rton",
-            "joust_season_rewards.rton", "joust_tournamentrewards.rton",
-            "calendar_schedule.rton", "dailyquestdata.rton"
-        )
-        var count = 0
-        for (fName in filesToBoost) {
-            val fullPath = "$cdnDir/$fName"
-            val json = readRtonAsJson(fullPath, log) ?: continue
-            boostRewardsRecursively(json)
-            if (writeJsonAsRton(fullPath, json, log)) count++
+        listOf("joust_crownrewards.rton", "joust_progressiverewards.rton", "calendar_schedule.rton").forEach { f ->
+            readRtonAsJson("$cdnDir/$f", log)?.let { j ->
+                boostRewards(j)
+                writeJsonAsRton("$cdnDir/$f", j, log)
+            }
         }
-        log("🏆 Пропатчено файлов Арены: $count (награды x100, требования снижены)")
-        return count > 0
+        return true
     }
 
-    private fun boostRewardsRecursively(node: Any?) {
+    private fun boostRewards(node: Any?) {
         when (node) {
             is JSONObject -> {
                 val keys = node.keys().asSequence().toList()
                 for (k in keys) {
                     val v = node.opt(k)
-                    val low = k.lowercase()
+                    val l = k.lowercase()
                     if (v is Number) {
-                        if (low.contains("crown") || low.contains("pointsneeded") || low.contains("required")) {
-                            node.put(k, 1)
-                        } else if (low.contains("amount") || low.contains("count") || low.contains("value")) {
-                            node.put(k, maxOf(v.toInt() * 100, 1000))
-                        }
-                    } else {
-                        boostRewardsRecursively(v)
+                        if (l.contains("crown") || l.contains("required")) node.put(k, 1)
+                        if (l.contains("amount") || l.contains("count")) node.put(k, maxOf(v.toInt() * 100, 1000))
                     }
+                    boostRewards(v)
                 }
             }
             is JSONArray -> {
-                for (i in 0 until node.length()) boostRewardsRecursively(node.opt(i))
+                for (i in 0 until node.length()) boostRewards(node.opt(i))
             }
         }
     }
@@ -391,16 +411,12 @@ object Pvz2Manager {
     fun restoreAllCdnBackups(cdnDir: String, log: (String) -> Unit) {
         val (pkg, _) = resolveNoBackupDir {}
         CryptoAndSyncManager.stopGameForSync(pkg, true, log)
-        val cmd = """
+        CryptoAndSyncManager.execSh("""
             for f in '$cdnDir'/*.bak_editor; do
-                if [ -f "${'$'}f" ]; then
-                    orig="${'$'}{f%.bak_editor}"
-                    cp "${'$'}f" "${'$'}orig"
-                fi
+                if [ -f "${'$'}f" ]; then cp "${'$'}f" "${'$'}{f%.bak_editor}"; fi
             done
             sync
-        """.trimIndent()
-        CryptoAndSyncManager.execSh(cmd, log)
+        """.trimIndent(), log)
         log("⏪ Оригинальные файлы восстановлены из бэкапов!")
     }
 }
