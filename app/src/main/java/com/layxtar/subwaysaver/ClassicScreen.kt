@@ -44,7 +44,7 @@ fun ClassicScreen(
     }
     var doubleCoinsOnly by remember { mutableStateOf(false) }
 
-    // Точные ключи медалей Top Run: 106=Бронза, 105=Серебро, 104=Золото, 103=Алмаз, 102=Чемпион
+    // Медали Top Run: 106=Бронза, 105=Серебро, 104=Золото, 103=Алмаз, 102=Чемпион
     var medalBronze by remember { mutableStateOf("0") }
     var medalSilver by remember { mutableStateOf("0") }
     var medalGold by remember { mutableStateOf("0") }
@@ -154,7 +154,7 @@ fun ClassicScreen(
     val st = classicState
     val _trig = uiTrigger
 
-    // Динамический подсчёт открытых сёрферов и досок со всеми их подскинами/способностями
+    // Счётчики 557 сёрферов/скинов и 573 досок/апгрейдов
     val (unlockedSurfersCount, totalSurfersCount) = remember(st, _trig) {
         if (st != null) ClassicCryptoAndSyncManager.getSurfersAndOutfitsCount(st) else (0 to 557)
     }
@@ -213,7 +213,7 @@ fun ClassicScreen(
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Загрузка Classic...") }
             } else {
                 when (selectedTab) {
-                    // ВКЛАДКА 0: РЕСУРСЫ КОШЕЛЬКА И ТОКЕНЫ
+                    // ВКЛАДКА 0: РЕСУРСЫ И ТОКЕНЫ
                     0 -> {
                         Column(
                             modifier = Modifier
@@ -247,7 +247,7 @@ fun ClassicScreen(
                                         OutlinedButton(modifier = Modifier.weight(1f), onClick = {
                                             pushUndo()
                                             ClassicCryptoAndSyncManager.maxPowerupLevelsAndScoreMultiplier(st)
-                                            log("🚀 Способности (Джетпак, Кроссовки, Магнит, x2) прокачаны до 6 ур.!")
+                                            log("🚀 Способности прокачаны до 6 ур.!")
                                         }) { Text("🚀 Бустеры 6 Ур.", fontSize = 11.sp) }
 
                                         OutlinedButton(modifier = Modifier.weight(1f), onClick = {
@@ -262,7 +262,7 @@ fun ClassicScreen(
                                 }
                             }
 
-                            Text("Ресурсы кошелька (включая токены персонажей: Шапки, Бумбоксы, Гитары, НЛО):", fontSize = 12.sp, color = Color.Gray)
+                            Text("Ресурсы и токены персонажей (Шапки, Бумбоксы, Гитары, НЛО):", fontSize = 12.sp, color = Color.Gray)
 
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Button(modifier = Modifier.weight(1f), onClick = {
@@ -272,7 +272,7 @@ fun ClassicScreen(
                                         classicCurrencies[id] = (c + 100000L).toString()
                                     }
                                     applyUIToState(st)
-                                    log("➕ Ко всем валютам и токенам добавлено +100 000")
+                                    log("➕ Ко всем ресурсам добавлено +100 000")
                                 }) { Text("+100K ко всем") }
 
                                 Button(modifier = Modifier.weight(1f), onClick = {
@@ -296,7 +296,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 1: СОБЫТИЯ, НАКРУТКА КУБКОВ И МЕДАЛИ TOP RUN
+                    // ВКЛАДКА 1: СОБЫТИЯ И МЕДАЛИ
                     1 -> {
                         Column(
                             modifier = Modifier
@@ -310,7 +310,6 @@ fun ClassicScreen(
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("🛠️ Починка Зависания Вкладки «События»", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("Очищает битые флаги из season_hunt.json и generic_challenges.json, а также сбрасывает переполнение 2147483647 у Чемпиона.", fontSize = 12.sp, color = Color.Gray)
                                     Button(
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
@@ -326,9 +325,7 @@ fun ClassicScreen(
 
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("🏆 Выбор Активного Забега и Накрутка Очков", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Редактор сам определил активные события в generic_challenges.json:", fontSize = 12.sp, color = Color.Gray)
-
+                                    Text("🏆 Накрутка Очков в Активные Ивенты", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     if (activeChallengesList.isEmpty()) {
                                         Text("⚠️ Активных ивентов не найдено.", color = Color.Yellow, fontSize = 13.sp)
                                     } else {
@@ -358,7 +355,7 @@ fun ClassicScreen(
 
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Checkbox(checked = unlockStagesCheckbox, onCheckedChange = { unlockStagesCheckbox = it })
-                                            Text("Снять таймеры сёрферов и рекламу с этапов", fontSize = 12.sp)
+                                            Text("Снять рекламу с этапов", fontSize = 12.sp)
                                         }
 
                                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -407,7 +404,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 2: СЁРФЕРЫ С УМНЫМ ПОИСКОМ ПО СКИНАМ И РАСКРЫВАЮЩИМИСЯ КОСТЮМАМИ
+                    // ВКЛАДКА 2: СЁРФЕРЫ С УМНЫМ ПОИСКОМ ПО ПОДСКИНАМ (557)
                     2 -> {
                         val allMergedSurfers = remember(st, _trig) {
                             ClassicCryptoAndSyncManager.getMergedSurfersList(st)
@@ -435,7 +432,7 @@ fun ClassicScreen(
                                 ClassicCryptoAndSyncManager.unlockAllClassicSurfersInMemory(st)
                                 uiTrigger++
                                 log("🏄 Все сёрферы и их костюмы открыты!")
-                            }) { Text("🏄 Открыть всех сёрферов и костюмы") }
+                            }) { Text("🏄 Открыть всех сёрферов и костюмы (557)") }
                             Spacer(modifier = Modifier.height(6.dp))
 
                             LazyColumn(
@@ -480,7 +477,6 @@ fun ClassicScreen(
                                                 }
                                             }
 
-                                            // Раскрывающиеся скины персонажа
                                             if (outfits.size > 1) {
                                                 TextButton(
                                                     contentPadding = PaddingValues(0.dp),
@@ -528,7 +524,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 3: ДОСКИ С ПОИСКОМ ПО СПОСОБНОСТЯМ И РАСКРЫВАЮЩИМИСЯ АПГРЕЙДАМИ
+                    // ВКЛАДКА 3: ДОСКИ И СПОСОБНОСТИ (573)
                     3 -> {
                         val allMergedBoards = remember(st, _trig) {
                             ClassicCryptoAndSyncManager.getMergedBoardsList(st)
@@ -547,7 +543,7 @@ fun ClassicScreen(
                             OutlinedTextField(
                                 value = boardSearchQuery,
                                 onValueChange = { boardSearchQuery = it },
-                                label = { Text("🔍 Поиск доски или способности (например: double_jump, monster)...") },
+                                label = { Text("🔍 Поиск доски или способности (например: double_jump)...") },
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Spacer(modifier = Modifier.height(6.dp))
@@ -556,7 +552,7 @@ fun ClassicScreen(
                                 ClassicCryptoAndSyncManager.unlockAllClassicBoardsInMemory(st)
                                 uiTrigger++
                                 log("🛹 Все доски и способности открыты!")
-                            }) { Text("🛹 Открыть все доски и способности") }
+                            }) { Text("🛹 Открыть все доски и способности (573)") }
                             Spacer(modifier = Modifier.height(6.dp))
 
                             LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 90.dp)) {
@@ -597,7 +593,6 @@ fun ClassicScreen(
                                                 }
                                             }
 
-                                            // Раскрывающиеся способности доски
                                             if (upgrades.isNotEmpty()) {
                                                 TextButton(
                                                     contentPadding = PaddingValues(0.dp),
@@ -644,7 +639,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 4: СУНДУКИ И ПОЛНАЯ РАЗБЛОКИРОВКА АЧИВОК
+                    // ВКЛАДКА 4: СУНДУКИ И ПОЛНАЯ РАЗБЛОКИРОВКА ДОСТИЖЕНИЙ (Браво Старс, Друзья и др.)
                     4 -> {
                         Column(
                             modifier = Modifier
@@ -658,14 +653,14 @@ fun ClassicScreen(
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("🌟 Полная Разблокировка Достижений (Achievements)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Закрывает все достижения на максимальный уровень: добавить медийных персон в друзья, собрать персонажей Brawl Stars, все социальные квесты и получить алмазные бейджи!", fontSize = 12.sp, color = Color.Gray)
+                                    Text("Разблокирует абсолютно все достижения: добавление медийных персон в друзья, сбор персонажей Brawl Stars, социальные квесты и алмазные бейджи!", fontSize = 12.sp, color = Color.Gray)
                                     Button(
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
                                         onClick = {
                                             pushUndo()
                                             ClassicCryptoAndSyncManager.unlockAllAchievementsCompletely(st)
-                                            log("🌟 ВСЕ достижения (друзья, Brawl Stars, алмазные бейджи) успешно разблокированы!")
+                                            log("🌟 Все достижения (друзья, Brawl Stars, алмазные бейджи) успешно разблокированы!")
                                         }
                                     ) { Text("🌟 РАЗБЛОКИРОВАТЬ ВСЕ ДОСТИЖЕНИЯ В 1 КЛИК", color = Color.White, fontWeight = FontWeight.Bold) }
                                 }
@@ -685,8 +680,8 @@ fun ClassicScreen(
                                     Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                         pushUndo()
                                         ClassicCryptoAndSyncManager.unlockAllPortraitsFramesAndTrophiesInMemory(st)
-                                        log("🖼️ Все 114 портретов, 56 рамок и трофеи разблокированы!")
-                                    }) { Text("🖼️ Открыть 114 Портретов и 56 Рамок") }
+                                        log("🖼️ Все портреты, рамки и трофеи открыты!")
+                                    }) { Text("🖼️ Открыть Портреты, Рамки и Трофеи") }
                                 }
                             }
                             Spacer(modifier = Modifier.height(90.dp))
