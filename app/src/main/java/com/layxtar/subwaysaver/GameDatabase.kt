@@ -107,6 +107,16 @@ object GameDatabase {
         "remove.ads", "premium_pass", "starterpack_bundle",
         "intermediatepack_bundle", "expertpack_bundle"
     )
+    fun getSkinsForSurfer(id: Long, name: String): List<Pair<Int, String>> {
+        val fromDb = SURFERS_WITH_SKINS.find { it.first == id }?.second?.second
+        return fromDb ?: listOf(
+            0 to "Скин по умолчанию (Default)",
+            1 to "Дополнительный скин 1 (Инкогнито / Повседневный)",
+            2 to "Дополнительный скин 2 (Особый)",
+            3 to "Дополнительный скин 3 (Эксклюзив)"
+        )
+    }
+
 
     val IAP_CATALOG = listOf(
         "remove.ads" to "🚫 Отключение Рекламы (No Ads)",
