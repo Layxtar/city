@@ -2,7 +2,6 @@ package com.layxtar.subwaysaver
 
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -43,28 +42,25 @@ fun CityScreen(
     var isLoaded by remember { mutableStateOf(false) }
     val undoStack = remember { mutableStateListOf<String>() }
 
+    // Упорядоченный список всех валют из сохранения + базы
+    val walletOrder = remember { mutableStateListOf<Long>() }
     val currencyStates = remember { mutableStateMapOf<Long, String>() }
-    val iapCheckedStates = remember { mutableStateMapOf<String, Boolean>() }
-    var iapFilterCategory by remember { mutableStateOf("Все") }
 
     var selectedPiggyId by remember { mutableStateOf(GameDatabase.PIGGY_BANKS.first().first) }
     var selectedPiggyMission by remember { mutableLongStateOf(GameDatabase.PIGGY_BANKS.first().second.first) }
     var piggyProgress by remember { mutableStateOf("0") }
-    var piggyFilled by remember { mutableStateOf(false) }
     var piggyFreeClaim by remember { mutableStateOf(false) }
 
     var seasonPurchased by remember { mutableStateOf(false) }
     var seasonPoints by remember { mutableStateOf("0") }
-    var selectedSeasonId by remember { mutableStateOf(GameDatabase.SEASONS.first().first) }
 
     var playerName by remember { mutableStateOf("") }
     var playerTag by remember { mutableStateOf("") }
     var playerLevel by remember { mutableStateOf("1") }
     var playerXp by remember { mutableStateOf("0") }
-    var boostedMultiplier by remember { mutableStateOf("0") }
 
-    var selectedSurferId by remember { mutableLongStateOf(GameDatabase.SURFERS.first().first) }
-    var selectedBoardId by remember { mutableLongStateOf(GameDatabase.BOARDS.first().first) }
+    var selectedSurferId by remember { mutableLongStateOf(0L) }
+    var selectedBoardId by remember { mutableLongStateOf(0L) }
     var crewSlot1 by remember { mutableLongStateOf(0L) }
     var crewSlot2 by remember { mutableLongStateOf(0L) }
     var crewSlot3 by remember { mutableLongStateOf(0L) }
@@ -74,13 +70,31 @@ fun CityScreen(
     var searchQuery by remember { mutableStateOf("") }
     var expandedSurferSkinId by remember { mutableStateOf<Long?>(null) }
 
+    fun getCurrencyLabel(tag: Long): String {
+        val fromDb = GameDatabase.CURRENCIES.find { it.first == tag }?.second
+        return fromDb ?: "💰 Валюта / Жетон (ID: $tag)"
+    }
+
+    // Обновляем wallet на месте, не ломая порядок и существующие записи!
     fun applyUIToProfile(prof: JSONObject) {
-        val wallet = JSONArray()
-        for ((tag, _) in GameDatabase.CURRENCIES) {
-            val count = currencyStates[tag]?.toLongOrNull() ?: 0L
-            wallet.put(JSONObject().put("dataTag", tag).put("count", count))
+        val wallet = prof.optJSONArray("wallet") ?: JSONArray()
+        val existingMap = LinkedHashMap<Long, JSONObject>()
+        for (i in 0 until wallet.length()) {
+            val item = wallet.getJSONObject(i)
+            existingMap[item.getLong("dataTag")] = item
         }
-        prof.put("wallet", wallet)
+        for (tag in walletOrder) {
+            val count = currencyStates[tag]?.toLongOrNull() ?: 0L
+            val existing = existingMap[tag]
+            if (existing != null) {
+                existing.put("count", count)
+            } else if (count > 0L) {
+                existingMap[tag] = JSONObject().put("dataTag", tag).put("count", count)
+            }
+        }
+        val newWallet = JSONArray()
+        for ((_, obj) in existingMap) newWallet.put(obj)
+        prof.put("wallet", newWallet)
 
         val onlineProf = prof.optJSONObject("onlinePlayerProfile") ?: JSONObject()
         if (playerName.isNotBlank()) onlineProf.put("name", playerName)
@@ -91,13 +105,8 @@ fun CityScreen(
         prof.put("level", playerLevel.toIntOrNull() ?: prof.optInt("level", 1))
         prof.put("xp", playerXp.toIntOrNull() ?: prof.optInt("xp", 0))
 
-        val bm = boostedMultiplier.toIntOrNull() ?: 0
-        if (bm > 0 || prof.has("boostedRunMultiplier")) {
-            prof.put("boostedRunMultiplier", JSONObject().put("runMultiplier", bm))
-        }
-
-        prof.put("character", selectedSurferId)
-        prof.put("selectedBoard", selectedBoardId)
+        if (selectedSurferId != 0L) prof.put("character", selectedSurferId)
+        if (selectedBoardId != 0L) prof.put("selectedBoard", selectedBoardId)
 
         if (crewSlot1 != 0L || crewSlot2 != 0L || crewSlot3 != 0L) {
             val crewArr = JSONArray()
@@ -109,7 +118,6 @@ fun CityScreen(
 
         prof.put("seasonPassPurchased", seasonPurchased)
         prof.put("seasonPassPoints", seasonPoints.toIntOrNull() ?: prof.optInt("seasonPassPoints", 0))
-        if (selectedSeasonId.isNotBlank()) prof.put("seasonPassId", selectedSeasonId)
         if (seasonPurchased) prof.put("hasSeenPremiumPassActivation", true)
 
         if (surfersList.isNotEmpty()) CryptoAndSyncManager.applyCitySurfers(prof, surfersList)
@@ -118,25 +126,35 @@ fun CityScreen(
 
     fun refreshUIFromProfile(prof: JSONObject) {
         val wallet = prof.optJSONArray("wallet") ?: JSONArray()
-        for ((tag, _) in GameDatabase.CURRENCIES) currencyStates[tag] = "0"
+        walletOrder.clear()
+        currencyStates.clear()
+
+        // 1. Сначала загружаем ровно те валюты и в том порядке, как они лежат в твоём сохранении!
         for (i in 0 until wallet.length()) {
             val item = wallet.getJSONObject(i)
-            currencyStates[item.getLong("dataTag")] = item.getLong("count").toString()
+            val tag = item.getLong("dataTag")
+            val cnt = item.getLong("count")
+            if (!walletOrder.contains(tag)) walletOrder.add(tag)
+            currencyStates[tag] = cnt.toString()
+        }
+        // 2. Дополняем известными валютами из базы, если их ещё не было
+        for ((tag, _) in GameDatabase.CURRENCIES) {
+            if (!walletOrder.contains(tag)) {
+                walletOrder.add(tag)
+                currencyStates[tag] = "0"
+            }
         }
 
         val purchases = prof.optJSONObject("purchaseHistory") ?: JSONObject()
-        for ((pId, _) in GameDatabase.IAP_CATALOG) iapCheckedStates[pId] = purchases.has(pId)
-
         val online = prof.optJSONObject("onlinePlayerProfile")
         playerName = online?.optString("name", "") ?: ""
         playerTag = online?.optString("tag", "") ?: ""
 
         playerLevel = prof.optInt("level", 1).toString()
         playerXp = prof.optInt("xp", 0).toString()
-        boostedMultiplier = prof.optJSONObject("boostedRunMultiplier")?.optInt("runMultiplier", 0)?.toString() ?: "0"
 
-        selectedSurferId = prof.optLong("character", GameDatabase.SURFERS.first().first)
-        selectedBoardId = prof.optLong("selectedBoard", GameDatabase.BOARDS.first().first)
+        selectedSurferId = prof.optLong("character", 0L)
+        selectedBoardId = prof.optLong("selectedBoard", 0L)
 
         val crewArr = prof.optJSONArray("crew")
         if (crewArr != null) {
@@ -149,16 +167,12 @@ fun CityScreen(
         if (piggy != null) {
             val curId = piggy.optString("currentId", GameDatabase.PIGGY_BANKS.first().first)
             selectedPiggyId = curId
-            selectedPiggyMission = GameDatabase.PIGGY_BANKS.find { it.first == curId }?.second?.first
-                ?: GameDatabase.PIGGY_BANKS.first().second.first
             piggyProgress = piggy.optInt("lastSeenProgress", 0).toString()
-            piggyFilled = piggy.optBoolean("isFilled", false)
             piggyFreeClaim = purchases.has(curId)
         }
 
         seasonPurchased = prof.optBoolean("seasonPassPurchased", false)
         seasonPoints = prof.optInt("seasonPassPoints", 0).toString()
-        selectedSeasonId = prof.optString("seasonPassId", GameDatabase.SEASONS.first().first)
 
         surfersList.clear()
         surfersList.addAll(CryptoAndSyncManager.parseCitySurfers(prof))
@@ -209,7 +223,8 @@ fun CityScreen(
                 undoStack.clear()
                 refreshUIFromProfile(loaded.third.second)
                 isLoaded = true
-                log("✅ Профиль City загружен ($playerName, Ур: $playerLevel)!")
+                val unlockedCnt = surfersList.count { it.isUnlocked }
+                log("✅ City загружен ($playerName, Открыто сёрферов: $unlockedCnt/${surfersList.size})!")
             } else {
                 log("❌ Профиль Subway Surfers City не найден.")
             }
@@ -243,9 +258,10 @@ fun CityScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        loadCityAsync()
-    }
+    LaunchedEffect(Unit) { loadCityAsync() }
+
+    val unlockedSurfersCnt = surfersList.count { it.isUnlocked }
+    val unlockedBoardsCnt = boardsList.count { it.isUnlocked }
 
     Scaffold(
         topBar = {
@@ -253,10 +269,10 @@ fun CityScreen(
                 if (isBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 ScrollableTabRow(selectedTabIndex = selectedTab) {
                     val tabs = listOf(
-                        "💰 Валюта",
+                        "💰 Кошелёк (${walletOrder.size})",
                         "⚡ Задания & Пропуск",
-                        "🏄 Сёрферы & Скины",
-                        "🛹 Доски (${boardsList.size})",
+                        "🏄 Сёрферы ($unlockedSurfersCnt/${surfersList.size})",
+                        "🛹 Доски ($unlockedBoardsCnt/${boardsList.size})",
                         "🐷 Копилка & Донат",
                         "📊 Профиль & Бэкап"
                     )
@@ -278,24 +294,15 @@ fun CityScreen(
                 Text(text = statusText, fontSize = 12.sp, color = Color(0xFF81C784), maxLines = 1)
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedButton(
-                        modifier = Modifier.weight(0.8f),
-                        enabled = undoStack.isNotEmpty() && !isBusy,
-                        onClick = { performUndo() }
-                    ) { Text("↩️ Назад", fontSize = 11.sp) }
-
-                    OutlinedButton(
-                        modifier = Modifier.weight(0.9f),
-                        enabled = !isBusy,
-                        onClick = { loadCityAsync() }
-                    ) { Text("🔄 Чтение", fontSize = 11.sp) }
-
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        enabled = isLoaded && !isBusy,
-                        onClick = { saveCityAsync(false) }
-                    ) { Text("💾 Сохранить", fontSize = 11.sp) }
-
+                    OutlinedButton(modifier = Modifier.weight(0.8f), enabled = undoStack.isNotEmpty() && !isBusy, onClick = { performUndo() }) {
+                        Text("↩️ Назад", fontSize = 11.sp)
+                    }
+                    OutlinedButton(modifier = Modifier.weight(0.9f), enabled = !isBusy, onClick = { loadCityAsync() }) {
+                        Text("🔄 Чтение", fontSize = 11.sp)
+                    }
+                    Button(modifier = Modifier.weight(1f), enabled = isLoaded && !isBusy, onClick = { saveCityAsync(false) }) {
+                        Text("💾 Сохранить", fontSize = 11.sp)
+                    }
                     Button(
                         modifier = Modifier.weight(1.1f),
                         enabled = isLoaded && !isBusy,
@@ -308,17 +315,18 @@ fun CityScreen(
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             when (selectedTab) {
-                // ВКЛАДКА 0: ВАЛЮТА
+                // ВКЛАДКА 0: ИСХОДНЫЙ КОШЕЛЁК БЕЗ ПЕРЕПУТЫВАНИЯ
                 0 -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Spacer(modifier = Modifier.height(6.dp))
+                        Text("Все валюты и жетоны загружены напрямую из твоего сохранения в оригинальном порядке:", fontSize = 12.sp, color = Color.Gray)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Button(modifier = Modifier.weight(1f), onClick = {
                                 pushUndo()
-                                GameDatabase.CURRENCIES.forEach { (tag, _) ->
+                                walletOrder.forEach { tag ->
                                     val c = currencyStates[tag]?.toLongOrNull() ?: 0L
                                     currencyStates[tag] = (c + 100000L).toString()
                                 }
@@ -327,15 +335,15 @@ fun CityScreen(
 
                             Button(modifier = Modifier.weight(1f), onClick = {
                                 pushUndo()
-                                GameDatabase.CURRENCIES.forEach { (tag, _) -> currencyStates[tag] = "9999999" }
+                                walletOrder.forEach { tag -> currencyStates[tag] = "9999999" }
                                 log("💎 Все валюты City выставлены на 9 999 999")
                             }) { Text("9.99M MAX") }
                         }
-                        GameDatabase.CURRENCIES.forEach { (tag, label) ->
+                        walletOrder.forEach { tag ->
                             OutlinedTextField(
                                 value = currencyStates[tag] ?: "0",
                                 onValueChange = { currencyStates[tag] = it },
-                                label = { Text(label) },
+                                label = { Text(getCurrencyLabel(tag)) },
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -401,7 +409,7 @@ fun CityScreen(
                                     onClick = {
                                         pushUndo()
                                         profileJson?.let {
-                                            GameDatabase.CURRENCIES.forEach { (tag, _) -> currencyStates[tag] = "9999999" }
+                                            walletOrder.forEach { tag -> currencyStates[tag] = "9999999" }
                                             CryptoAndSyncManager.unlockAndMaxAllSurfers(it)
                                             CryptoAndSyncManager.unlockAndMaxAllBoards(it)
                                             CryptoAndSyncManager.unlockAllSkinsAndAvatars(it)
@@ -411,7 +419,7 @@ fun CityScreen(
                                             CryptoAndSyncManager.hackDailyDealsAndAdRewards(it)
                                             CryptoAndSyncManager.unlockAllEventTrialsAnd3StarMissions(it)
                                             CryptoAndSyncManager.completeAllDailyAndWeeklyMissions(it)
-                                            CryptoAndSyncManager.configurePiggyBank(it, "shop.piggybankmlp7.3", -2000200805L, 250000, true, true)
+                                            CryptoAndSyncManager.configurePiggyBank(it, selectedPiggyId, selectedPiggyMission, 250000, true, true)
                                             refreshUIFromProfile(it)
                                             log("👑 РЕЖИМ БОГА АКТИВИРОВАН!")
                                         }
@@ -423,13 +431,11 @@ fun CityScreen(
                     }
                 }
 
-                // ВКЛАДКА 2: СЁРФЕРЫ С ВЫБОРОМ И ОТКРЫТИЕМ КОНКРЕТНЫХ КОСТЮМОВ
+                // ВКЛАДКА 2: СЁРФЕРЫ С ВЫБОРОМ ЛЮБОГО КОСТЮМА (ВКЛЮЧАЯ CUSTOM СКИНЫ)
                 2 -> {
                     val filteredSurfers = surfersList.filter {
                         it.name.contains(searchQuery, ignoreCase = true) ||
-                        GameDatabase.SURFERS_WITH_SKINS.find { s -> s.first == it.id }?.second?.second?.any { skin ->
-                            skin.second.contains(searchQuery, ignoreCase = true)
-                        } == true
+                        it.availableSkins.any { skin -> skin.second.contains(searchQuery, ignoreCase = true) }
                     }
 
                     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
@@ -437,22 +443,20 @@ fun CityScreen(
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            label = { Text("🔍 Поиск сёрфера или скина (например, Инкогнито)...") },
+                            label = { Text("🔍 Поиск сёрфера или скина (например: Инкогнито, Джейк)...") },
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Button(modifier = Modifier.weight(1f), onClick = {
-                                pushUndo()
-                                profileJson?.let {
-                                    applyUIToProfile(it)
-                                    CryptoAndSyncManager.unlockAndMaxAllSurfers(it)
-                                    CryptoAndSyncManager.unlockAllSkinsAndAvatars(it)
-                                    refreshUIFromProfile(it)
-                                    log("🏄 Все сёрферы и 125 костюмов открыты!")
-                                }
-                            }) { Text("🏄 Открыть всех + 125 скинов") }
-                        }
+                        Button(modifier = Modifier.fillMaxWidth(), onClick = {
+                            pushUndo()
+                            profileJson?.let {
+                                applyUIToProfile(it)
+                                CryptoAndSyncManager.unlockAndMaxAllSurfers(it)
+                                CryptoAndSyncManager.unlockAllSkinsAndAvatars(it)
+                                refreshUIFromProfile(it)
+                                log("🏄 Все сёрферы и все костюмы разблокированы!")
+                            }
+                        }) { Text("🏄 Открыть всех сёрферов (20 Ур.) + Все Костюмы") }
                         Spacer(modifier = Modifier.height(6.dp))
 
                         LazyColumn(
@@ -464,9 +468,8 @@ fun CityScreen(
                                 val realIdx = surfersList.indexOfFirst { it.id == surfer.id }
                                 if (realIdx != -1) {
                                     val item = surfersList[realIdx]
-                                    val surferMeta = GameDatabase.SURFERS_WITH_SKINS.find { it.first == item.id }
-                                    val availableSkins = surferMeta?.second?.second ?: listOf(0 to "Обычный (Default)")
-                                    val isExpanded = expandedSurferSkinId == item.id
+                                    val isExpanded = expandedSurferSkinId == item.id ||
+                                        (searchQuery.isNotBlank() && item.availableSkins.any { it.second.contains(searchQuery, true) })
 
                                     Card(modifier = Modifier.fillMaxWidth()) {
                                         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -478,7 +481,7 @@ fun CityScreen(
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Text(item.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                                     Text(
-                                                        text = if (item.isUnlocked) "✅ ОТКРЫТ" else "🔒 ЗАКРЫТ",
+                                                        text = if (item.isUnlocked) "✅ ОТКРЫТ (Скин #${item.selectedSkin})" else "🔒 ЗАКРЫТ",
                                                         color = if (item.isUnlocked) Color(0xFF81C784) else Color(0xFFE57373),
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 12.sp
@@ -516,44 +519,45 @@ fun CityScreen(
                                                 )
                                             }
 
-                                            // Кнопка раскрытия костюмов персонажа
-                                            if (availableSkins.size > 1) {
-                                                TextButton(
-                                                    contentPadding = PaddingValues(0.dp),
-                                                    onClick = { expandedSurferSkinId = if (isExpanded) null else item.id }
-                                                ) {
-                                                    Text(if (isExpanded) "🔼 Скрыть костюмы" else "🔽 Выбрать костюм (${availableSkins.size} шт.)", fontSize = 12.sp)
-                                                }
-                                                if (isExpanded) {
-                                                    availableSkins.forEach { (skinNum, skinName) ->
-                                                        Row(
-                                                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                                                            verticalAlignment = Alignment.CenterVertically,
-                                                            horizontalArrangement = Arrangement.SpaceBetween
-                                                        ) {
-                                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                                RadioButton(
-                                                                    selected = item.selectedSkin == skinNum,
-                                                                    onClick = {
-                                                                        pushUndo()
-                                                                        surfersList[realIdx] = item.copy(selectedSkin = skinNum, isUnlocked = true)
-                                                                        log("🎭 Для ${item.name} выбран костюм: $skinName")
-                                                                    }
-                                                                )
-                                                                Text(skinName, fontSize = 13.sp)
-                                                            }
-                                                            Button(
-                                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            TextButton(
+                                                contentPadding = PaddingValues(0.dp),
+                                                onClick = { expandedSurferSkinId = if (expandedSurferSkinId == item.id) null else item.id }
+                                            ) {
+                                                Text(
+                                                    if (isExpanded) "🔼 Скрыть скины персонажа"
+                                                    else "🔽 Открыть и выбрать скин (${item.availableSkins.size} шт.)",
+                                                    fontSize = 12.sp
+                                                )
+                                            }
+
+                                            if (isExpanded) {
+                                                item.availableSkins.forEach { (skinNum, skinName) ->
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                                            RadioButton(
+                                                                selected = item.selectedSkin == skinNum,
                                                                 onClick = {
                                                                     pushUndo()
                                                                     surfersList[realIdx] = item.copy(selectedSkin = skinNum, isUnlocked = true)
-                                                                    profileJson?.let { prof ->
-                                                                        CryptoAndSyncManager.unlockAllSkinsAndAvatars(prof)
-                                                                    }
-                                                                    log("✅ Костюм '$skinName' разблокирован и надет!")
+                                                                    profileJson?.let { CryptoAndSyncManager.unlockAllSkinsAndAvatars(it) }
+                                                                    log("🎭 Для ${item.name} выбран скин: $skinName")
                                                                 }
-                                                            ) { Text("Надеть", fontSize = 11.sp) }
+                                                            )
+                                                            Text(skinName, fontSize = 13.sp)
                                                         }
+                                                        Button(
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                            onClick = {
+                                                                pushUndo()
+                                                                surfersList[realIdx] = item.copy(selectedSkin = skinNum, isUnlocked = true)
+                                                                profileJson?.let { CryptoAndSyncManager.unlockAllSkinsAndAvatars(it) }
+                                                                log("✅ Скин '$skinName' открыт и надет!")
+                                                            }
+                                                        ) { Text("Открыть & Надеть", fontSize = 10.sp) }
                                                     }
                                                 }
                                             }
@@ -566,7 +570,7 @@ fun CityScreen(
                                                     pushUndo()
                                                     selectedSurferId = item.id
                                                     surfersList[realIdx] = item.copy(isUnlocked = true)
-                                                    log("🏄 Активен: ${item.name}")
+                                                    log("🏄 Взят в забег: ${item.name}")
                                                 }) {
                                                     Text(if (selectedSurferId == item.id) "⭐ Активен" else "Взять в забег", fontSize = 11.sp)
                                                 }
@@ -596,6 +600,17 @@ fun CityScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(6.dp))
+                        Button(modifier = Modifier.fillMaxWidth(), onClick = {
+                            pushUndo()
+                            profileJson?.let {
+                                applyUIToProfile(it)
+                                CryptoAndSyncManager.unlockAndMaxAllBoards(it)
+                                refreshUIFromProfile(it)
+                                log("🛹 Все доски открыты на 20 ур.!")
+                            }
+                        }) { Text("🛹 Открыть все доски (20 Ур.)") }
+                        Spacer(modifier = Modifier.height(6.dp))
+
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -647,7 +662,7 @@ fun CityScreen(
                     }
                 }
 
-                // ВКЛАДКА 4: СВИНЬЯ-КОПИЛКА И ДОНАТ
+                // ВКЛАДКА 4: КОПИЛКА
                 4 -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
