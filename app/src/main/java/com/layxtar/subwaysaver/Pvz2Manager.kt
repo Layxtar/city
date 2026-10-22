@@ -129,7 +129,7 @@ object Pvz2Manager {
         return writeJsonAsRton(getPpDatPath(), ppJson, log)
     }
 
-    // ==================== НАСИЛЬНОЕ ВНЕДРЕНИЕ НА ВИТРИНУ МАГАЗИНА ====================
+    // ==================== НАСИЛЬНОЕ ВНЕДРЕНИЕ СЕМЯН И РАСТЕНИЙ В МАГАЗИН И FIND MORE ====================
 
     fun patchShopAllFor1CoinAndInjectSeeds(
         cdnDir: String,
@@ -147,7 +147,7 @@ object Pvz2Manager {
         val schedJson = readRtonAsJson(marketSchedPath, log) ?: return false
         val layoutJson = readRtonAsJson(marketLayoutPath, log) ?: return false
 
-        // 1. Патчим magento_filter.rton (разрешаем показ всех растений и скинов)
+        // 1. Патчим magento_filter.rton: разрешаем показ всех растений
         readRtonAsJson(magentoPath, log)?.let { magento ->
             val objs = magento.optJSONArray("objects")
             if (objs != null && objs.length() > 0) {
@@ -175,7 +175,7 @@ object Pvz2Manager {
         val allPlantSkus = mutableListOf<String>()
         val allSeedSkus = mutableListOf<String>()
 
-        // Создаём товар для выбранного семени
+        // Создаём кастомный пак семян для выбранного растения
         val customSeedSku = "editor.SeedPacket.$selectedPlantId.$seedAmount"
         allSeedSkus.add(customSeedSku)
         pObjects.put(JSONObject().apply {
@@ -213,26 +213,28 @@ object Pvz2Manager {
                     })
                 })
 
-                // Пакет семян на 10 000 шт. для каждого растения
-                val seedSku = "editor.SeedPacket.$pId.10000"
-                allSeedSkus.add(seedSku)
-                pObjects.put(JSONObject().apply {
-                    put("aliases", JSONArray().put(seedSku))
-                    put("objclass", "StoreProductProps")
-                    put("objdata", JSONObject().apply {
-                        put("IsFree", false)
-                        put("IsOneTimePurchase", false)
-                        put("Name", "Seed - $pName x10000")
-                        put("ObjectCount", 10000)
-                        put("ObjectItem", pId)
-                        put("ObjectType", "seedpacket")
-                        put("PriceCoins", "1")
-                        put("Sku", seedSku)
+                // Пакеты семян по 500 и 10 000 для каждого растения (перехватывают кнопку Find More!)
+                for (amt in listOf(500, 10000)) {
+                    val sSku = "editor.SeedPacket.$pId.$amt"
+                    allSeedSkus.add(sSku)
+                    pObjects.put(JSONObject().apply {
+                        put("aliases", JSONArray().put(sSku))
+                        put("objclass", "StoreProductProps")
+                        put("objdata", JSONObject().apply {
+                            put("IsFree", false)
+                            put("IsOneTimePurchase", false)
+                            put("Name", "Seed - $pName x$amt")
+                            put("ObjectCount", amt)
+                            put("ObjectItem", pId)
+                            put("ObjectType", "seedpacket")
+                            put("PriceCoins", "1")
+                            put("Sku", sSku)
+                        })
                     })
-                })
+                }
             }
 
-            // Добавляем все 342 скина (костюма)
+            // Добавляем все 342 скина
             for (cNum in 1..342) {
                 val cSku = "editor.Costume.$cNum"
                 pObjects.put(JSONObject().apply {
@@ -252,23 +254,27 @@ object Pvz2Manager {
             }
         }
 
-        // Обнуляем стоимость всех остальных существующих товаров на 1 монету
+        // Обнуляем стоимость всех остальных товаров на 1 монету
         for (i in 0 until pObjects.length()) {
             val d = pObjects.getJSONObject(i).optJSONObject("objdata") ?: continue
             d.put("PriceCoins", "1")
             d.put("PriceGems", 0)
             d.put("Price", 0.0)
             d.put("IsFree", false)
+            // Увеличиваем стандартные пакеты Find More с 5 штук до 500!
+            if (d.optString("ObjectType").contains("seed", ignoreCase = true)) {
+                val curCnt = d.optInt("ObjectCount", 0)
+                if (curCnt in 1..20) d.put("ObjectCount", 500)
+            }
         }
         productsJson.put("objects", pObjects)
         writeJsonAsRton(productsPath, productsJson, log)
 
-        // 3. НАСИЛЬНО ВНЕДРЯЕМ В market_schedule.rton (в секцию "Plants", "Seeds", "Bundles")
+        // 3. Внедряем в market_schedule.rton (категории "Plants" и "Seeds")
         val schedObjs = schedJson.optJSONArray("objects")
         if (schedObjs != null && schedObjs.length() > 0) {
             val entries = schedObjs.getJSONObject(0).optJSONObject("objdata")?.optJSONArray("MarketScheduleEntries")
             if (entries != null) {
-                // Создаём принудительную постоянную секцию "Editor Plants & Seeds"
                 val newScheduledProducts = JSONArray()
 
                 for (sku in allPlantSkus) {
@@ -293,7 +299,7 @@ object Pvz2Manager {
                 }
 
                 entries.put(JSONObject().apply {
-                    put("Name", "EditorAllPlantsAndSeeds")
+                    put("Name", "EditorPlantsAndSeeds")
                     put("StartDateTime", 0)
                     put("EndDateTime", 0)
                     put("ScheduledProducts", newScheduledProducts)
@@ -302,7 +308,7 @@ object Pvz2Manager {
         }
         writeJsonAsRton(marketSchedPath, schedJson, log)
 
-        // 4. Патчим market_layout.rton (активируем вкладки витрины)
+        // 4. Патчим market_layout.rton: регистрируем вкладки Plants и Seeds
         val layoutObjs = layoutJson.optJSONArray("objects")
         if (layoutObjs != null && layoutObjs.length() > 0) {
             val markets = layoutObjs.getJSONObject(0).optJSONObject("objdata")?.optJSONArray("Markets")
@@ -320,7 +326,7 @@ object Pvz2Manager {
         }
         writeJsonAsRton(marketLayoutPath, layoutJson, log)
 
-        log("🛒 Насильный инжект завершён: все растения, семена и скины выставлены на витрину за 1🪙!")
+        log("🛒 Магазин и кнопка Find More полностью пропатчены (семена по 500 и 10 000 шт. за 1🪙)!")
         return true
     }
 
@@ -336,7 +342,6 @@ object Pvz2Manager {
                     val k = keys.next()
                     val cfg = slotConfigs.getJSONObject(k)
                     val slots = cfg.optJSONArray("Slots") ?: JSONArray()
-                    // Расширяем до 20 слотов семян
                     while (slots.length() < 20) slots.put("PlantXP")
                     cfg.put("Slots", slots)
                     cfg.put("PercentPinataAward", 1)
