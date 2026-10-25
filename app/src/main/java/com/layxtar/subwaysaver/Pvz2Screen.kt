@@ -43,11 +43,6 @@ fun Pvz2Screen(
             Pvz2Database.CURRENCIES.forEach { (k, _) -> put(k, "0") }
         }
     }
-    var plantSearch by remember { mutableStateOf("") }
-    var selectedPlantId by remember { mutableStateOf(Pvz2Database.PLANTS.first().first) }
-    var selectedSeedTierAmount by remember { mutableIntStateOf(1000000) }
-    var customSeedInput by remember { mutableStateOf("1000000") }
-    var unlockAllPlantsInShop by remember { mutableStateOf(true) }
     var targetPlantLevel by remember { mutableStateOf("20") }
     var targetMastery by remember { mutableStateOf("200") }
     var pinataMultiplier by remember { mutableStateOf("100") }
@@ -73,7 +68,7 @@ fun Pvz2Screen(
             if (pp != null) {
                 val curMap = Pvz2Manager.readPpDatCurrencies(pp)
                 for ((k, v) in curMap) currencies[k] = v.toString()
-                log("🌻 PvZ 2 успешно прочитан! Папка: ${cdn.substringAfterLast("/")}")
+                log("🌻 PvZ 2 успешно прочитан! Активный кэш: ${cdn.substringAfterLast("/")}")
             } else {
                 log("🌻 Папка кэша обнаружена: ${cdn.substringAfterLast("/")}")
             }
@@ -81,7 +76,9 @@ fun Pvz2Screen(
         }
     }
 
-    LaunchedEffect(Unit) { loadPvz2Async() }
+    LaunchedEffect(Unit) {
+        loadPvz2Async()
+    }
 
     Scaffold(
         topBar = {
@@ -89,11 +86,10 @@ fun Pvz2Screen(
                 if (isBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 ScrollableTabRow(selectedTabIndex = selectedTab) {
                     val tabs = listOf(
-                        "🛒 Магазин за 1🪙",
-                        "🌱 Все Семена (1..1M)",
-                        "🪅 Пиньяты & Моды",
+                        "🛒 Мега-Магазин (1🪙)",
+                        "🌞 0 Солнца & Моды",
                         "💰 Профиль pp.dat",
-                        "📂 Папка CDN"
+                        "📂 Папка CDN & Откат"
                     )
                     tabs.forEachIndexed { idx, title ->
                         Tab(selected = selectedTab == idx, onClick = { selectedTab = idx }, text = { Text(title) })
@@ -106,9 +102,12 @@ fun Pvz2Screen(
                 Text(text = statusText, fontSize = 12.sp, color = Color(0xFF81C784), maxLines = 1)
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    OutlinedButton(modifier = Modifier.weight(1f), enabled = !isBusy, onClick = { loadPvz2Async() }) {
-                        Text("🔄 Обновить CDN", fontSize = 12.sp)
-                    }
+                    OutlinedButton(
+                        modifier = Modifier.weight(1f),
+                        enabled = !isBusy,
+                        onClick = { loadPvz2Async() }
+                    ) { Text("🔄 Обновить CDN", fontSize = 12.sp) }
+
                     Button(
                         modifier = Modifier.weight(1.2f),
                         enabled = !isBusy,
@@ -124,19 +123,25 @@ fun Pvz2Screen(
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             when (selectedTab) {
-                // ВКЛАДКА 0: МАГАЗИН ЗА 1 МОНЕТУ
+                // ВКЛАДКА 0: ПРИНУДИТЕЛЬНЫЙ МЕГА-МАГАЗИН (ВСЕ 214 РАСТЕНИЙ, 342 СКИНА И НАБОРЫ СЕМЯН 1..1M)
                 0 -> {
-                    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🛒 Всё по 1 Монете в Магазине PvZ 2", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                Text("Насильно внедряет на витрину все растения, 342 костюма и пакеты семян через связку products + market_schedule + market_layout + magento_filter за 1 монету!", fontSize = 12.sp, color = Color.Gray)
-
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(checked = unlockAllPlantsInShop, onCheckedChange = { unlockAllPlantsInShop = it })
-                                    Text("Добавить в магазин абсолютно все растения, скины и семена")
-                                }
+                                Text("🛒 Полный Мега-Магазин: 214 Растений, 342 Скина и Семена за 1 Монету", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text(
+                                    "Прошивает все 5 файлов магазина (`magento_filter.rton`, `market_layout.rton`, `pinatacoreloot.rton`, `products.rton`, `market_schedule.rton`) в папке `${activeCdnDir.substringAfterLast("/")}`:\n" +
+                                    "• Вкладка Plants: все 214 растений (включая Scorchoak / pyroak, Thornwhip, Volt Snapdragon) за 1 монету.\n" +
+                                    "• Вкладка Costumes: все 342 скина за 1 монету.\n" +
+                                    "• Вкладки Seeds 1 / Seeds 2 / Seeds 3: наборы по 1, 100, 10 000, 100 000 и 1 000 000 семян для каждого растения за 1 монету!\n" +
+                                    "• Вкладки Bundles, Upgrades & Resources: все апгрейды и пакеты валют до 10 000 000 за 1 монету.",
+                                    fontSize = 12.sp,
+                                    color = Color.Gray
+                                )
 
                                 Button(
                                     modifier = Modifier.fillMaxWidth(),
@@ -145,113 +150,80 @@ fun Pvz2Screen(
                                         scope.launch {
                                             isBusy = true
                                             withContext(Dispatchers.IO) {
-                                                Pvz2Manager.patchShopAllFor1CoinAndInjectSeeds(
-                                                    cdnDir = activeCdnDir,
-                                                    selectedPlantId = selectedPlantId,
-                                                    seedAmount = 250,
-                                                    unlockAllPlantsAndSkinsInShop = unlockAllPlantsInShop,
-                                                    log = log
-                                                )
+                                                Pvz2Manager.installFullMegaShopAllPlantsSkinsAndSeeds(activeCdnDir, log)
                                             }
                                             isBusy = false
                                         }
                                     }
-                                ) { Text("🛒 СДЕЛАТЬ ВЕСЬ МАГАЗИН ПО 1 МОНЕТЕ", color = Color.White, fontWeight = FontWeight.Bold) }
+                                ) {
+                                    Text("🛒 УСТАНОВИТЬ МЕГА-МАГАЗИН (214 РАСТЕНИЙ + СЕМЕНА + 342 СКИНА)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+
+                                Divider(modifier = Modifier.padding(vertical = 4.dp))
+                                Text("🔥 Новейшие растения, добавленные на витрину и в Seeds 2:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF81C784))
+                                Pvz2Database.NEWEST_PLANTS_HIGHLIGHT.forEach { (id, title) ->
+                                    Text("• $title (ID: $id)", fontSize = 12.sp)
+                                }
                             }
                         }
                         Spacer(modifier = Modifier.height(90.dp))
                     }
                 }
 
-                // ВКЛАДКА 1: ГЕНЕРАТОР СЕМЯН
+                // ВКЛАДКА 1: 0 СОЛНЦА (ИСПРАВЛЕННЫЙ FLOATSTATS), ЛУТ ПИНЬЯТ И АРЕНА
                 1 -> {
-                    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🌱 Генератор Семян (От 1 до 1 000 000 шт.)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                Text("Выбери любое растение (включая Scorchoak / Pyroak), количество семян и внедри в магазин за 1 монету:", fontSize = 12.sp, color = Color.Gray)
-
-                                Pvz2Database.SEED_PACKET_TIERS.forEach { (amount, desc) ->
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        RadioButton(selected = selectedSeedTierAmount == amount, onClick = {
-                                            selectedSeedTierAmount = amount
-                                            customSeedInput = amount.toString()
-                                        })
-                                        Text(desc, fontSize = 13.sp)
-                                    }
-                                }
-
-                                OutlinedTextField(
-                                    value = customSeedInput,
-                                    onValueChange = { customSeedInput = it },
-                                    label = { Text("Или впиши любое количество семян") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("🌞 Мод: 0 Солнца + Мгновенная Перезарядка (FloatStats Fix)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("Обнуляет массивы `Cost`, `PacketCooldown` и `StartingCooldown` внутри `FloatStats` в файле `PlantLevels.rton` и `PlantProperties.rton` для всех уровней прокачки (1–20 и Mastery).", fontSize = 12.sp, color = Color.Gray)
                                 Button(
                                     modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2)),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
                                     onClick = {
                                         scope.launch {
                                             isBusy = true
-                                            val seeds = (customSeedInput.toIntOrNull() ?: selectedSeedTierAmount).coerceIn(1, 1000000)
                                             withContext(Dispatchers.IO) {
-                                                Pvz2Manager.patchShopAllFor1CoinAndInjectSeeds(
-                                                    cdnDir = activeCdnDir,
-                                                    selectedPlantId = selectedPlantId,
-                                                    seedAmount = seeds,
-                                                    unlockAllPlantsAndSkinsInShop = false,
-                                                    log = log
-                                                )
+                                                Pvz2Manager.patchZeroSunAndInstantCooldown(activeCdnDir, log)
                                             }
                                             isBusy = false
                                         }
                                     }
-                                ) { Text("🌱 ВНЕДРИТЬ СЕМЕНА ЭТОГО РАСТЕНИЯ (1🪙)", color = Color.White, fontWeight = FontWeight.Bold) }
-
-                                Divider(modifier = Modifier.padding(vertical = 4.dp))
-                                OutlinedTextField(
-                                    value = plantSearch,
-                                    onValueChange = { plantSearch = it },
-                                    label = { Text("🔍 Поиск растения по имени или ID...") },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-
-                                val filteredPlants = Pvz2Database.PLANTS.filter {
-                                    it.first.contains(plantSearch, true) || it.second.contains(plantSearch, true)
-                                }
-
-                                filteredPlants.forEach { (pId, pName) ->
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        RadioButton(selected = selectedPlantId == pId, onClick = { selectedPlantId = pId })
-                                        Text(pName, fontSize = 13.sp)
-                                    }
-                                }
+                                ) { Text("🌞 ВКЛЮЧИТЬ 0 СОЛНЦА + 0 СЕК ПЕРЕЗАРЯДКИ", color = Color.White, fontWeight = FontWeight.Bold) }
                             }
                         }
-                        Spacer(modifier = Modifier.height(90.dp))
-                    }
-                }
 
-                // ВКЛАДКА 2: ПИНЬЯТЫ И МОДЫ
-                2 -> {
-                    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Spacer(modifier = Modifier.height(6.dp))
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🪅 Лут Пиньят (pinatacoreloot.rton)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("🪅 Умножитель Лута Обычных Пиньят (pinatacoreloot.rton)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedTextField(value = pinataMultiplier, onValueChange = { pinataMultiplier = it }, label = { Text("Множитель") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                                    OutlinedTextField(value = pinataMinSeeds, onValueChange = { pinataMinSeeds = it }, label = { Text("Мин. семян") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                                    OutlinedTextField(
+                                        value = pinataMultiplier,
+                                        onValueChange = { pinataMultiplier = it },
+                                        label = { Text("Множитель") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedTextField(
+                                        value = pinataMinSeeds,
+                                        onValueChange = { pinataMinSeeds = it },
+                                        label = { Text("Мин. семян") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                                 Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                     scope.launch {
                                         isBusy = true
                                         val mult = pinataMultiplier.toIntOrNull() ?: 100
                                         val minS = pinataMinSeeds.toIntOrNull() ?: 1000
-                                        withContext(Dispatchers.IO) { Pvz2Manager.patchPinataCoreLoot(activeCdnDir, mult, minS, log) }
+                                        withContext(Dispatchers.IO) {
+                                            Pvz2Manager.patchPinataCoreLoot(activeCdnDir, mult, minS, log)
+                                        }
                                         isBusy = false
                                     }
                                 }) { Text("🪅 Увеличить Лут Пиньят") }
@@ -260,20 +232,7 @@ fun Pvz2Screen(
 
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("🌞 Мод: 0 Солнца + 0 сек Перезарядки", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                Button(modifier = Modifier.fillMaxWidth(), onClick = {
-                                    scope.launch {
-                                        isBusy = true
-                                        withContext(Dispatchers.IO) { Pvz2Manager.patchZeroSunAndInstantCooldown(activeCdnDir, log) }
-                                        isBusy = false
-                                    }
-                                }) { Text("🌞 Включить 0 Солнца + Мгновенный Кулдаун") }
-                            }
-                        }
-
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("🏆 Мега-Награды Арены (x100)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("🏆 Мега-Награды Арены (x100) и Календаря", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                     scope.launch {
                                         isBusy = true
@@ -287,10 +246,15 @@ fun Pvz2Screen(
                     }
                 }
 
-                // ВКЛАДКА 3: PP.DAT
-                3 -> {
-                    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // ВКЛАДКА 2: СОХРАНЕНИЕ PP.DAT
+                2 -> {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Spacer(modifier = Modifier.height(6.dp))
+                        Text("Прямой редактор сохранения `pp.dat` (все 214 растений):", fontSize = 12.sp, color = Color.Gray)
+
                         Button(modifier = Modifier.fillMaxWidth(), onClick = {
                             Pvz2Database.CURRENCIES.forEach { (k, _) -> currencies[k] = "99999999" }
                             log("💎 Все валюты выставлены на 99 999 999")
@@ -308,36 +272,71 @@ fun Pvz2Screen(
 
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🌿 Прокачка растений в pp.dat", fontWeight = FontWeight.Bold)
+                                Text("🌿 Открыть все 214 растений напрямую в pp.dat", fontWeight = FontWeight.Bold)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedTextField(value = targetPlantLevel, onValueChange = { targetPlantLevel = it }, label = { Text("Уровень (1-20)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                                    OutlinedTextField(value = targetMastery, onValueChange = { targetMastery = it }, label = { Text("Mastery (0-200)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                                    OutlinedTextField(
+                                        value = targetPlantLevel,
+                                        onValueChange = { targetPlantLevel = it },
+                                        label = { Text("Уровень (1-20)") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    OutlinedTextField(
+                                        value = targetMastery,
+                                        onValueChange = { targetMastery = it },
+                                        label = { Text("Mastery (0-200)") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
                                 Button(modifier = Modifier.fillMaxWidth(), onClick = {
-                                    val pp = ppDatJson ?: return@Button
+                                    val pp = ppDatJson
+                                    if (pp == null) {
+                                        log("❌ pp.dat не загружен!")
+                                        return@Button
+                                    }
                                     scope.launch {
                                         isBusy = true
                                         val map = currencies.mapValues { it.value.toLongOrNull() ?: 0L }
                                         val lvl = targetPlantLevel.toIntOrNull() ?: 20
                                         val mst = targetMastery.toIntOrNull() ?: 200
-                                        withContext(Dispatchers.IO) { Pvz2Manager.updatePpDatAndUnlockPlants(pp, map, true, lvl, mst, log) }
+                                        withContext(Dispatchers.IO) {
+                                            Pvz2Manager.updatePpDatAndUnlockPlants(pp, map, true, lvl, mst, log)
+                                        }
                                         isBusy = false
                                     }
-                                }) { Text("💾 Сохранить pp.dat") }
+                                }) { Text("💾 Сохранить Валюты и 214 Растений в pp.dat") }
                             }
                         }
                         Spacer(modifier = Modifier.height(90.dp))
                     }
                 }
 
-                // ВКЛАДКА 4: CDN
-                4 -> {
-                    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // ВКЛАДКА 3: ПУТЬ CDN И ОТКАТ
+                3 -> {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("📂 Путь к кэшу CDN", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                OutlinedTextField(value = activeCdnDir, onValueChange = { activeCdnDir = it }, label = { Text("Путь к CDN") }, modifier = Modifier.fillMaxWidth())
+                                OutlinedTextField(
+                                    value = activeCdnDir,
+                                    onValueChange = { activeCdnDir = it },
+                                    label = { Text("Путь к папке CDN") },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                if (detectedCdnList.isNotEmpty()) {
+                                    Text("Обнаруженные CDN:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    detectedCdnList.forEach { dirPath ->
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            RadioButton(selected = activeCdnDir == dirPath, onClick = { activeCdnDir = dirPath })
+                                            Text(dirPath.substringAfterLast("/"), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
                                 Divider()
                                 OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
                                     scope.launch {
@@ -345,7 +344,7 @@ fun Pvz2Screen(
                                         withContext(Dispatchers.IO) { Pvz2Manager.restoreAllCdnBackups(activeCdnDir, log) }
                                         isBusy = false
                                     }
-                                }) { Text("⏪ Восстановить оригиналы .rton") }
+                                }) { Text("⏪ Восстановить оригиналы .rton из бэкапов") }
                             }
                         }
 
