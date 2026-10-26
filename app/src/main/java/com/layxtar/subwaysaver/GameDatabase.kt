@@ -9,19 +9,20 @@ data class CitySkinInfo(
 
 object GameDatabase {
 
+    // Исправленные теги валют Subway Surfers City (Золото = -633437229L, Билеты = -635142441L, Возрождения = Банки)
     val CURRENCIES = listOf(
-        -635142441L to "🪙 Монеты (Coins)",
+        -633437229L to "🪙 Монеты / Золото (Coins)",
         -2008679869L to "🔑 Ключи (Keys)",
-        -1085419483L to "🍬 Конфеты для скинов (Candies)",
+        1669706535L to "🥫 Банки возрождения (Revive Cans)",
+        -635142441L to "🎫 Билеты испытаний (Event / Trial Tickets)",
+        -1085419483L to "🍬 Конфеты / Жетоны скинов (Skin Candies)",
         -1878560402L to "🎟️ Жетоны сёрферов (Surfer Tokens)",
         -1509662453L to "🛹 Жетоны досок (Board Tokens)",
-        326719861L to "⚡ Энергия / Батарейки",
-        1669706535L to "❤️ Ревайвы / Сердца (Revives)",
-        -633437229L to "🎫 Билеты кампании (Campaign Tickets)",
+        326719861L to "⚡ Энергия / Батарейки (Energy)",
         722065917L to "⭐ Кредиты сёрферов (Surfer Credits)"
     )
 
-    // Все 24 сёрфера из актуального surfers.json и boards.json
+    // Все 27 сёрферов из актуального surfers.json и boards.json
     val SURFERS = listOf(
         -1836944478L to "Jake (Джейк)",
         1900660162L to "Tricky (Трики)",
@@ -265,7 +266,7 @@ object GameDatabase {
     // Полный плоский список всех 125 скинов из surferskins.json
     val ALL_SKINS: List<Long> = SURFER_SKINS_MAP.values.flatten().map { it.dataTag }.distinct()
 
-    // Все доски из актуального boards.json
+    // Все 29 досок из актуального boards.json
     val BOARDS = listOf(
         857306595L to "Default Board (Стандартная доска)",
         821107692L to "Jake's Board (Доска Джейка)",
@@ -337,13 +338,13 @@ object GameDatabase {
         "shop.remove.ads" to "🚫 Полное отключение рекламы (Remove Ads)",
         "surfers.co.tagbotunlock001" to "🤖 Цепной оффер: Разблокировка Tagbot + Набор",
         "store.chainoffer.iapstepup.2" to "💎 Step-Up Оффер 1 (100 Ключей + Бонусы)",
-        "store.chainoffer.iapstepup.4" to "❤️ Step-Up Оффер 2 (5 Ревайвов + 15 Жетонов досок)",
+        "store.chainoffer.iapstepup.4" to "🥫 Step-Up Оффер 2 (5 Банок возрождения + 15 Жетонов досок)",
         "store.chainoffer.iapstepup.6" to "🔑 Step-Up Оффер 3 (200 Ключей + Кредит сёрфера)",
         "store.chainoffer.iapstepup.8" to "🪙 Step-Up Оффер 4 (40 000 Монет)",
         "store.chainoffer.iapstepup.10" to "🎫 Step-Up Оффер 5 (50 Билетов кампании)",
         "store.chainoffer.iapstepup.12" to "👑 Step-Up Оффер Финал (300 Ключей + 5 000 Монет)",
         "store.chainoffer.iapstepup2.1" to "⚡ Step-Up II (100 Ключей + Доски + Кредиты)",
-        "store.chainoffer.iapstepup2.4" to "⚡ Step-Up II (5 Ревайвов)",
+        "store.chainoffer.iapstepup2.4" to "⚡ Step-Up II (5 Банок возрождения)",
         "store.chainoffer.iapstepup2.7" to "⚡ Step-Up II (40 000 Монет)",
         "store.chainoffer.iapstepup2.10" to "⚡ Step-Up II Финал (300 Ключей)",
         "store.chainoffer.iapconv.1" to "🎁 Конверсионный Мега-Набор 1",
