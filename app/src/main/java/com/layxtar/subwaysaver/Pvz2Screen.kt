@@ -123,7 +123,6 @@ fun Pvz2Screen(
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             when (selectedTab) {
-                // ВКЛАДКА 0: ПРИНУДИТЕЛЬНЫЙ МЕГА-МАГАЗИН (ВСЕ 214 РАСТЕНИЙ, 342 СКИНА И НАБОРЫ СЕМЯН 1..1M)
                 0 -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -132,13 +131,13 @@ fun Pvz2Screen(
                         Spacer(modifier = Modifier.height(6.dp))
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🛒 Полный Мега-Магазин: 214 Растений, 342 Скина и Семена за 1 Монету", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("🛒 Полный Магазин: Стандартные наборы + 214 Растений + 342 Скина + Семена за 1 Монету", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Text(
-                                    "Прошивает все 5 файлов магазина (`magento_filter.rton`, `market_layout.rton`, `pinatacoreloot.rton`, `products.rton`, `market_schedule.rton`) в папке `${activeCdnDir.substringAfterLast("/")}`:\n" +
+                                    "Обновляет магазин в папке `${activeCdnDir.substringAfterLast("/")}`:\n" +
+                                    "• Сохраняет все стандартные бандлы, пиньяты и офферы игры, делая их по 1 монете.\n" +
                                     "• Вкладка Plants: все 214 растений (включая Scorchoak / pyroak, Thornwhip, Volt Snapdragon) за 1 монету.\n" +
                                     "• Вкладка Costumes: все 342 скина за 1 монету.\n" +
-                                    "• Вкладки Seeds 1 / Seeds 2 / Seeds 3: наборы по 1, 100, 10 000, 100 000 и 1 000 000 семян для каждого растения за 1 монету!\n" +
-                                    "• Вкладки Bundles, Upgrades & Resources: все апгрейды и пакеты валют до 10 000 000 за 1 монету.",
+                                    "• Вкладки Seeds 1 / Seeds 2 / Seeds 3: пакеты по 1, 100, 10 000, 100 000 и 1 000 000 семян с иконкой самого растения (без ошибок MISSING)!",
                                     fontSize = 12.sp,
                                     color = Color.Gray
                                 )
@@ -156,11 +155,11 @@ fun Pvz2Screen(
                                         }
                                     }
                                 ) {
-                                    Text("🛒 УСТАНОВИТЬ МЕГА-МАГАЗИН (214 РАСТЕНИЙ + СЕМЕНА + 342 СКИНА)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Text("🛒 ПРОПАТЧИТЬ МАГАЗИН (ВСЕ РАСТЕНИЯ, СЕМЕНА И НАБОРЫ ЗА 1🪙)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 }
 
                                 Divider(modifier = Modifier.padding(vertical = 4.dp))
-                                Text("🔥 Новейшие растения, добавленные на витрину и в Seeds 2:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF81C784))
+                                Text("🔥 Новейшие растения на витрине и во вкладке Seeds 2:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF81C784))
                                 Pvz2Database.NEWEST_PLANTS_HIGHLIGHT.forEach { (id, title) ->
                                     Text("• $title (ID: $id)", fontSize = 12.sp)
                                 }
@@ -170,7 +169,6 @@ fun Pvz2Screen(
                     }
                 }
 
-                // ВКЛАДКА 1: 0 СОЛНЦА (ИСПРАВЛЕННЫЙ FLOATSTATS), ЛУТ ПИНЬЯТ И АРЕНА
                 1 -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -180,7 +178,7 @@ fun Pvz2Screen(
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text("🌞 Мод: 0 Солнца + Мгновенная Перезарядка (FloatStats Fix)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                Text("Обнуляет массивы `Cost`, `PacketCooldown` и `StartingCooldown` внутри `FloatStats` в файле `PlantLevels.rton` и `PlantProperties.rton` для всех уровней прокачки (1–20 и Mastery).", fontSize = 12.sp, color = Color.Gray)
+                                Text("Обнуляет массивы `Cost`, `PacketCooldown` и `StartingCooldown` внутри `FloatStats` в файле `PlantLevels.rton` и `PlantProperties.rton` для всех уровней прокачки.", fontSize = 12.sp, color = Color.Gray)
                                 Button(
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
@@ -199,7 +197,7 @@ fun Pvz2Screen(
 
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🪅 Умножитель Лута Обычных Пиньят (pinatacoreloot.rton)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("🪅 Умножитель Лута Пиньят (pinatacoreloot.rton)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedTextField(
                                         value = pinataMultiplier,
@@ -246,7 +244,6 @@ fun Pvz2Screen(
                     }
                 }
 
-                // ВКЛАДКА 2: СОХРАНЕНИЕ PP.DAT
                 2 -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -312,7 +309,6 @@ fun Pvz2Screen(
                     }
                 }
 
-                // ВКЛАДКА 3: ПУТЬ CDN И ОТКАТ
                 3 -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
