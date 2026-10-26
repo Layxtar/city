@@ -138,28 +138,28 @@ object Pvz2Manager {
         return writeJsonAsRton(getPpDatPath(), ppJson, log)
     }
 
-    // ==================== 1. ПОЛНЫЙ МЕГА-МАГАЗИН ЗА 1 МОНЕТУ (БЕЗ MISSING, С ИКОНКАМИ РАСТЕНИЙ И РАБОЧЕЙ ВЫДАЧЕЙ СЕМЯН) ====================
+    // ==================== 1. УСТАНОВКА МАГАЗИНА СО СТАНДАРТНЫМИ НАБОРАМИ + ВСЕМИ РАСТЕНИЯМИ И СЕМЕНАМИ ====================
 
     fun installFullMegaShopAllPlantsSkinsAndSeeds(cdnDir: String, log: (String) -> Unit): Boolean {
-        log("⏳ 1/5: Снятие фильтра магазина (magento_filter.rton) для всех 214 растений, наборов и 342 скинов...")
+        log("⏳ 1/5: Разрешаем типы plant, seedpacket, costume, bundle в magento_filter.rton...")
         val magentoJson = buildMagentoFilterJson()
         if (!writeJsonAsRton("$cdnDir/magento_filter.rton", magentoJson, log)) return false
 
-        log("⏳ 2/5: Создание вкладок магазина (market_layout.rton: Promoted, Bundles, Plants, Costumes, Seeds 1-3)...")
+        log("⏳ 2/5: Обновление макета вкладок (market_layout.rton) с сохранением стандартных категорий...")
         val layoutJson = buildMarketLayoutJson()
         if (!writeJsonAsRton("$cdnDir/market_layout.rton", layoutJson, log)) return false
 
-        log("⏳ 3/5: Создание CoreLoopRewardsTableProps в pinatacoreloot.rton для выдачи семян каждого из 214 растений...")
-        if (!patchPinataCoreLootForAllSeedPackets(cdnDir, log)) return false
+        log("⏳ 3/5: Настройка таблиц наград семян в pinatacoreloot.rton...")
+        patchPinataCoreLootForAllSeedPackets(cdnDir, log)
 
-        log("⏳ 4/5: Генерация товаров в products.rton (с сохранением стандартных наборов, иконками растений и ключами без MISSING)...")
+        log("⏳ 4/5: Обновление products.rton (сохранены стандартные наборы игры + добавлены 214 растений, 342 скина и семена)...")
         val (productsJson, scheduleJson) = buildProductsAndMarketScheduleJson(cdnDir, log)
         if (!writeJsonAsRton("$cdnDir/products.rton", productsJson, log)) return false
 
         log("⏳ 5/5: Запись расписания витрины (market_schedule.rton)...")
         if (!writeJsonAsRton("$cdnDir/market_schedule.rton", scheduleJson, log)) return false
 
-        log("🎉 МЕГА-МАГАЗИН ОБНОВЛЁН! Иконки растений, тексты без MISSING, выдача семян и все стандартные наборы работают!")
+        log("🎉 Магазин обновлён! Все стандартные наборы сохранены, семена имеют иконку своего растения и выдаются при покупке!")
         return true
     }
 
@@ -182,9 +182,11 @@ object Pvz2Manager {
             put(JSONObject().put("Type", "bundle").put("WarnEnsureRealMoneyOnly", false))
             put(JSONObject().put("Type", "sprout").put("WarnEnsureGemsOnly", false))
             put(JSONObject().put("Type", "pinata").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "plant").put("SubTypeFilters", plantSubTypes))
+            // Обязательно разрешаем прямой тип seedpacket за монеты, чтобы семена выдавались с иконкой растения!
+            put(JSONObject().put("Type", "seedpacket").put("WarnEnsureRealMoneyOnly", false).put("SubTypeFilters", plantSubTypes))
+            put(JSONObject().put("Type", "plant").put("WarnEnsureRealMoneyOnly", false).put("SubTypeFilters", plantSubTypes))
             put(JSONObject().put("Type", "gameupgrade").put("WarnEnsureRealMoneyOnly", false).put("SubTypeFilters", upgradeSubTypes))
-            put(JSONObject().put("Type", "costume").put("SubTypeFilters", costumeSubTypes))
+            put(JSONObject().put("Type", "costume").put("WarnEnsureRealMoneyOnly", false).put("SubTypeFilters", costumeSubTypes))
         }
 
         val sheetObj = JSONObject().apply {
@@ -202,12 +204,14 @@ object Pvz2Manager {
     private fun buildMarketLayoutJson(): JSONObject {
         val mainClusters = JSONArray().apply {
             put("Promotions"); put("Bundles"); put("Plants")
-            put("Costumes"); put("Seeds"); put("Seeds2"); put("Seeds3")
-            put("Upgrades"); put("Pinatas")
+            put("Seeds"); put("Seeds2"); put("Seeds3")
+            put("Pinatas"); put("Costumes"); put("Upgrades")
         }
 
         val markets = JSONArray().apply {
             put(JSONObject().put("Type", "Main").put("Clusters", mainClusters))
+            put(JSONObject().put("Type", "Tutorial").put("Clusters", JSONArray().put("Tutorial")))
+            put(JSONObject().put("Type", "Tutorial50MB").put("Clusters", JSONArray().put("Tutorial50MB")))
             put(JSONObject().put("Type", "CoinQuickStore").put("Clusters", JSONArray().put("CoinQuickStore")).put("QuickStoreInnerHeader", "[STORE_COINS_CURRENT_PROFILE]"))
             put(JSONObject().put("Type", "GemQuickStore").put("Clusters", JSONArray().put("GemQuickStore")).put("QuickStoreInnerHeader", "[STORE_GEMS_CURRENT_PROFILE]"))
             put(JSONObject().put("Type", "SproutQuickStore").put("Clusters", JSONArray().put("SproutQuickStore")).put("QuickStoreInnerHeader", "[STORE_SPROUTS_CURRENT_PROFILE]"))
@@ -218,6 +222,7 @@ object Pvz2Manager {
 
         val clusters = JSONArray().apply {
             put(JSONObject().put("Type", "Promotions").put("Tabs", JSONArray().put("Promoted Offers").put("Resources")))
+            put(JSONObject().put("Type", "Pinatas").put("Tabs", JSONArray().put("Pinatas")))
             put(JSONObject().put("Type", "Bundles").put("Tabs", JSONArray().put("Bundles")))
             put(JSONObject().put("Type", "Plants").put("Tabs", JSONArray().put("Plants")))
             put(JSONObject().put("Type", "Costumes").put("Tabs", JSONArray().put("Costumes")))
@@ -225,7 +230,8 @@ object Pvz2Manager {
             put(JSONObject().put("Type", "Seeds2").put("Tabs", JSONArray().put("Seeds2")))
             put(JSONObject().put("Type", "Seeds3").put("Tabs", JSONArray().put("Seeds3")))
             put(JSONObject().put("Type", "Upgrades").put("Tabs", JSONArray().put("Upgrades")))
-            put(JSONObject().put("Type", "Pinatas").put("Tabs", JSONArray().put("Pinatas")))
+            put(JSONObject().put("Type", "Tutorial").put("Tabs", JSONArray().put("Tutorial")))
+            put(JSONObject().put("Type", "Tutorial50MB").put("Tabs", JSONArray().put("Tutorial50MB")))
             put(JSONObject().put("Type", "CoinQuickStore").put("Tabs", JSONArray().put("CoinQuickStore")))
             put(JSONObject().put("Type", "GemQuickStore").put("Tabs", JSONArray().put("GemQuickStore")))
             put(JSONObject().put("Type", "SproutQuickStore").put("Tabs", JSONArray().put("SproutQuickStore")))
@@ -235,50 +241,56 @@ object Pvz2Manager {
         }
 
         val tabs = JSONArray().apply {
-            put(JSONObject().put("Type", "Promoted Offers").put("Name", "Promoted").put("ImageDown", "IMAGE_UI_STORE_GEMSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_GEMSTAB_ACTIVE").put("Categories", JSONArray().put("Promoted Offers")))
-            put(JSONObject().put("Type", "Resources").put("Name", "Resources").put("ImageDown", "IMAGE_UI_STORE_COINSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_COINSTAB_ACTIVE").put("Categories", JSONArray().put("Coins").put("Gems").put("Tickets").put("Fuel").put("Sprouts").put("Mint")))
-            put(JSONObject().put("Type", "Bundles").put("Name", "Bundles").put("ImageDown", "IMAGE_UI_STORE_BUNDLESTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_BUNDLESTAB_ACTIVE").put("Categories", JSONArray().put("Bundles")))
-            put(JSONObject().put("Type", "Plants").put("Name", "Plants").put("ImageDown", "IMAGE_UI_STORE_PLANTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PLANTSTAB_ACTIVE").put("Categories", JSONArray().put("Plants")))
+            put(JSONObject().put("Type", "Promoted Offers").put("Name", "[STORE_TAB_PROMOTED]").put("ImageDown", "IMAGE_UI_STORE_GEMSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_GEMSTAB_ACTIVE").put("Categories", JSONArray().put("Promoted Offers")))
+            put(JSONObject().put("Type", "Resources").put("Name", "[STORE_TAB_RESOURCES]").put("ImageDown", "IMAGE_UI_STORE_COINSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_COINSTAB_ACTIVE").put("Categories", JSONArray().put("Coins").put("Gems").put("Tickets").put("Fuel").put("Sprouts").put("Mint")))
+            put(JSONObject().put("Type", "Pinatas").put("Name", "[STORE_TAB_PINATAS]").put("ImageDown", "IMAGE_UI_STORE_PINATASTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PINATASTAB_ACTIVE").put("Categories", JSONArray().put("Pinatas")))
+            put(JSONObject().put("Type", "Bundles").put("Name", "[STORE_TAB_BUNDLES]").put("ImageDown", "IMAGE_UI_STORE_BUNDLESTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_BUNDLESTAB_ACTIVE").put("Categories", JSONArray().put("Bundles")))
+            put(JSONObject().put("Type", "Plants").put("Name", "[STORE_TAB_PLANTS]").put("ImageDown", "IMAGE_UI_STORE_PLANTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PLANTSTAB_ACTIVE").put("Categories", JSONArray().put("Plants")))
             put(JSONObject().put("Type", "Costumes").put("Name", "Costumes").put("ImageDown", "IMAGE_UI_STORE_PLANTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PLANTSTAB_ACTIVE").put("Categories", JSONArray().put("Costumes")))
-            put(JSONObject().put("Type", "Seeds").put("Name", "Seeds").put("ImageDown", "IMAGE_UI_STORE_SPROUTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_SPROUTSTAB_ACTIVE").put("Categories", JSONArray().put("Seeds")))
-            put(JSONObject().put("Type", "Seeds2").put("Name", "Seeds2").put("ImageDown", "IMAGE_UI_STORE_SPROUTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_SPROUTSTAB_ACTIVE").put("Categories", JSONArray().put("Seeds2")))
-            put(JSONObject().put("Type", "Seeds3").put("Name", "Seeds3").put("ImageDown", "IMAGE_UI_STORE_SPROUTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_SPROUTSTAB_ACTIVE").put("Categories", JSONArray().put("Seeds3")))
-            put(JSONObject().put("Type", "Upgrades").put("Name", "Upgrades").put("ImageDown", "IMAGE_UI_STORE_UPGRADESTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_UPGRADESTAB_ACTIVE").put("Categories", JSONArray().put("Upgrades")))
-            put(JSONObject().put("Type", "Pinatas").put("Name", "Piñatas").put("ImageDown", "IMAGE_UI_STORE_PINATASTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PINATASTAB_ACTIVE").put("Categories", JSONArray().put("Pinatas")))
-            put(JSONObject().put("Type", "CoinQuickStore").put("Name", "Coins").put("ImageDown", "IMAGE_UI_STORE_COINSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_COINSTAB_ACTIVE").put("Categories", JSONArray().put("Coins")))
-            put(JSONObject().put("Type", "GemQuickStore").put("Name", "Gems").put("ImageDown", "IMAGE_UI_STORE_GEMSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_GEMSTAB_ACTIVE").put("Categories", JSONArray().put("Gems")))
-            put(JSONObject().put("Type", "SproutQuickStore").put("Name", "Sprouts").put("ImageDown", "IMAGE_UI_STORE_SPROUTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_SPROUTSTAB_ACTIVE").put("Categories", JSONArray().put("Sprouts")))
-            put(JSONObject().put("Type", "GauntletQuickStore").put("Name", "Tickets").put("ImageDown", "IMAGE_UI_STORE_UPGRADESTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_UPGRADESTAB_ACTIVE").put("Categories", JSONArray().put("Tickets")))
-            put(JSONObject().put("Type", "FuelQuickStore").put("Name", "Fuel").put("ImageDown", "IMAGE_UI_STORE_PLANTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PLANTSTAB_ACTIVE").put("Categories", JSONArray().put("Fuel")))
-            put(JSONObject().put("Type", "MintQuickStore").put("Name", "Mints").put("ImageDown", "IMAGE_UI_STORE_COINSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_COINSTAB_ACTIVE").put("Categories", JSONArray().put("Mint")))
+            put(JSONObject().put("Type", "Seeds").put("Name", "Seeds 1").put("ImageDown", "IMAGE_UI_STORE_SPROUTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_SPROUTSTAB_ACTIVE").put("Categories", JSONArray().put("Seeds")))
+            put(JSONObject().put("Type", "Seeds2").put("Name", "Seeds 2").put("ImageDown", "IMAGE_UI_STORE_SPROUTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_SPROUTSTAB_ACTIVE").put("Categories", JSONArray().put("Seeds2")))
+            put(JSONObject().put("Type", "Seeds3").put("Name", "Seeds 3").put("ImageDown", "IMAGE_UI_STORE_SPROUTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_SPROUTSTAB_ACTIVE").put("Categories", JSONArray().put("Seeds3")))
+            put(JSONObject().put("Type", "Upgrades").put("Name", "[STORE_TAB_UPGRADES]").put("ImageDown", "IMAGE_UI_STORE_UPGRADESTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_UPGRADESTAB_ACTIVE").put("Categories", JSONArray().put("Upgrades")))
+            put(JSONObject().put("Type", "Tutorial").put("Name", "Tutorial").put("ImageDown", "IMAGE_UI_STORE_PINATASTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PLANTSTAB_ACTIVE").put("Categories", JSONArray().put("Tutorial")))
+            put(JSONObject().put("Type", "Tutorial50MB").put("Name", "Tutorial50MB").put("ImageDown", "IMAGE_UI_STORE_PINATASTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PLANTSTAB_ACTIVE").put("Categories", JSONArray().put("Tutorial50MB")))
+            put(JSONObject().put("Type", "CoinQuickStore").put("Name", "Coins").put("ImageDown", "IMAGE_UI_STORE_COINSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_COINSTAB_ACTIVE").put("Categories", JSONArray().put("QuickCoins")))
+            put(JSONObject().put("Type", "GemQuickStore").put("Name", "Gems").put("ImageDown", "IMAGE_UI_STORE_GEMSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_GEMSTAB_ACTIVE").put("Categories", JSONArray().put("QuickGems")))
+            put(JSONObject().put("Type", "SproutQuickStore").put("Name", "Sprouts").put("ImageDown", "IMAGE_UI_STORE_SPROUTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_SPROUTSTAB_ACTIVE").put("Categories", JSONArray().put("QuickSprouts")))
+            put(JSONObject().put("Type", "GauntletQuickStore").put("Name", "Tickets").put("ImageDown", "IMAGE_UI_STORE_UPGRADESTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_UPGRADESTAB_ACTIVE").put("Categories", JSONArray().put("QuickGauntlets")))
+            put(JSONObject().put("Type", "FuelQuickStore").put("Name", "Fuel").put("ImageDown", "IMAGE_UI_STORE_PLANTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PLANTSTAB_ACTIVE").put("Categories", JSONArray().put("QuickFuel")))
+            put(JSONObject().put("Type", "MintQuickStore").put("Name", "Mints").put("ImageDown", "IMAGE_UI_STORE_COINSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_COINSTAB_ACTIVE").put("Categories", JSONArray().put("Coins")))
         }
 
         val categories = JSONArray().apply {
-            put(JSONObject().put("Type", "Promoted Offers").put("LabelText", "Shop 1 Coin").put("MaxCount", -1).put("PromotionSlots", JSONArray().put("Slot1").put("Slot2").put("Slot3").put("Slot4").put("Slot5").put("Slot6").put("Slot7")))
-            put(JSONObject().put("Type", "Coins").put("LabelText", "Coins").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_COIN_CARD"))
-            put(JSONObject().put("Type", "Gems").put("LabelText", "Gems").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_GEM_CARD"))
-            put(JSONObject().put("Type", "Tickets").put("LabelText", "Tickets").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_UPGRADE_CARD"))
-            put(JSONObject().put("Type", "Fuel").put("LabelText", "Fuel").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
-            put(JSONObject().put("Type", "Sprouts").put("LabelText", "Sprouts").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
-            put(JSONObject().put("Type", "Mint").put("LabelText", "Mints").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PINATA_CARD"))
-            put(JSONObject().put("Type", "Bundles").put("LabelText", "Bundles").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_BUNDLE_CARD"))
-            put(JSONObject().put("Type", "Plants").put("LabelText", "Plants").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
-            put(JSONObject().put("Type", "Costumes").put("LabelText", "Costumes").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
-            put(JSONObject().put("Type", "Seeds").put("LabelText", "Seed Packets").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
-            put(JSONObject().put("Type", "Seeds2").put("LabelText", "Seed Packets").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
-            put(JSONObject().put("Type", "Seeds3").put("LabelText", "Seed Packets").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
-            put(JSONObject().put("Type", "Upgrades").put("LabelText", "Upgrades").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_UPGRADE_CARD"))
-            put(JSONObject().put("Type", "Pinatas").put("LabelText", "Piñatas").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_GEM_CARD"))
+            put(JSONObject().put("Type", "Promoted Offers").put("LabelText", "[STORE_CATEGORY_PROMOTED]").put("MaxCount", -1).put("PromotionSlots", JSONArray().put("Slot1").put("Slot2").put("Slot3").put("Slot4").put("Slot5").put("Slot6").put("Slot7")))
+            put(JSONObject().put("Type", "Coins").put("LabelText", "[STORE_CATEGORY_COINS]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_COIN_CARD"))
+            put(JSONObject().put("Type", "Gems").put("LabelText", "[STORE_CATEGORY_GEMS]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_GEM_CARD"))
+            put(JSONObject().put("Type", "Tickets").put("LabelText", "[STORE_CATEGORY_GAUNTLETS]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_UPGRADE_CARD"))
+            put(JSONObject().put("Type", "Fuel").put("LabelText", "[STORE_CATEGORY_FUEL]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
+            put(JSONObject().put("Type", "Sprouts").put("LabelText", "[STORE_CATEGORY_SPROUTS]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
+            put(JSONObject().put("Type", "Mint").put("LabelText", "[STORE_CATEGORY_MINTS]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PINATA_CARD"))
+            put(JSONObject().put("Type", "Pinatas").put("LabelText", "[STORE_CATEGORY_PINATAS]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_GEM_CARD"))
+            put(JSONObject().put("Type", "Bundles").put("LabelText", "[STORE_CATEGORY_BUNDLES]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_BUNDLE_CARD"))
+            put(JSONObject().put("Type", "Plants").put("LabelText", "[STORE_CATEGORY_PLANTS]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
+            put(JSONObject().put("Type", "Costumes").put("LabelText", "[ALMANAC_COSTUME_DIALOG_TITLE]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
+            // Для семян ставим карточку растений (STORE_PLANT_CARD), чтобы они выглядели как карточки растений!
+            put(JSONObject().put("Type", "Seeds").put("LabelText", "[STORE_CATEGORY_PLANTS]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
+            put(JSONObject().put("Type", "Seeds2").put("LabelText", "[STORE_CATEGORY_PLANTS]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
+            put(JSONObject().put("Type", "Seeds3").put("LabelText", "[STORE_CATEGORY_PLANTS]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
+            put(JSONObject().put("Type", "Upgrades").put("LabelText", "[STORE_CATEGORY_UPGRADES]").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_UPGRADE_CARD"))
+            put(JSONObject().put("Type", "Tutorial").put("LabelText", "Tutorial").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
+            put(JSONObject().put("Type", "Tutorial50MB").put("LabelText", "Tutorial50MB").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
+            put(JSONObject().put("Type", "QuickCoins").put("LabelText", "Coins").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_COIN_CARD"))
+            put(JSONObject().put("Type", "QuickGems").put("LabelText", "Gems").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_GEM_CARD"))
+            put(JSONObject().put("Type", "QuickGauntlets").put("LabelText", "Gauntlets").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_UPGRADE_CARD"))
+            put(JSONObject().put("Type", "QuickFuel").put("LabelText", "Fuel").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
+            put(JSONObject().put("Type", "QuickSprouts").put("LabelText", "Sprouts").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
         }
 
         val promoSlots = JSONArray().apply {
-            put(JSONObject().put("Type", "Slot1").put("GroupPriority", JSONArray().put("IFBundle").put("IFBundle2").put("Shop1CoinPreview")).put("FallbackCategory", "Resources"))
-            put(JSONObject().put("Type", "Slot2").put("GroupPriority", JSONArray().put("Shop1CoinUpdate")).put("FallbackCategory", "Bundles"))
-            put(JSONObject().put("Type", "Slot3").put("GroupPriority", JSONArray().put("AllPlantsPremium")).put("FallbackCategory", "Bundles"))
-            put(JSONObject().put("Type", "Slot4").put("GroupPriority", JSONArray().put("100MillionSeedPacketsAllPlants")).put("FallbackCategory", "Bundles"))
-            put(JSONObject().put("Type", "Slot5").put("GroupPriority", JSONArray().put("UnlockShopChinesePlants")).put("FallbackCategory", "Bundles"))
-            put(JSONObject().put("Type", "Slot6").put("GroupPriority", JSONArray().put("NewSeeds")).put("FallbackCategory", "Bundles"))
-            put(JSONObject().put("Type", "Slot7").put("GroupPriority", JSONArray().put("NoAdsPacks")).put("FallbackCategory", "Bundles"))
+            for (slotIdx in 1..7) {
+                put(JSONObject().put("Type", "Slot$slotIdx").put("GroupPriority", JSONArray().put("Bundles")).put("FallbackCategory", "Bundles"))
+            }
         }
 
         val layoutObj = JSONObject().apply {
@@ -299,39 +311,36 @@ object Pvz2Manager {
         }
     }
 
-    // ИСПРАВЛЕНО: Добавляет в pinatacoreloot.rton как SlotConfigs, так и корневые объекты CoreLoopRewardsTableProps в массив "objects"!
-    // Именно поэтому теперь при покупке пакета семян игра реально начисляет семена выбранного растения!
-    private fun patchPinataCoreLootForAllSeedPackets(cdnDir: String, log: (String) -> Unit): Boolean {
+    // Правильное добавление таблиц семян в pinatacoreloot.rton (RewardsTables — это JSONArray с полями Min и Max!)
+    private fun patchPinataCoreLootForAllSeedPackets(cdnDir: String, log: (String) -> Unit) {
         val path = "$cdnDir/pinatacoreloot.rton"
-        val json = readRtonAsJson(path, log) ?: run {
-            log("❌ Файл pinatacoreloot.rton не найден!")
-            return false
-        }
-        val objects = json.optJSONArray("objects") ?: return false
+        val json = readRtonAsJson(path, log) ?: return
+        val objects = json.optJSONArray("objects") ?: return
 
         var slotConfigsObj: JSONObject? = null
-        val existingTableAliases = mutableSetOf<String>()
+        var rewardsTablesArr: JSONArray? = null
 
         for (i in 0 until objects.length()) {
             val obj = objects.getJSONObject(i)
-            val aliases = obj.optJSONArray("aliases")
-            if (aliases != null) {
-                for (a in 0 until aliases.length()) {
-                    existingTableAliases.add(aliases.optString(a))
-                }
-            }
             val data = obj.optJSONObject("objdata") ?: continue
-            if (data.has("SlotConfigs")) {
-                slotConfigsObj = data.optJSONObject("SlotConfigs")
+            if (data.has("SlotConfigs")) slotConfigsObj = data.optJSONObject("SlotConfigs")
+            if (data.has("RewardsTables") && data.opt("RewardsTables") is JSONArray) {
+                rewardsTablesArr = data.optJSONArray("RewardsTables")
             }
         }
 
         if (slotConfigsObj != null) {
-            for (plantId in Pvz2Database.ALL_PLANT_IDS) {
-                val slotKey = "free_linhym_${plantId}1"
-                val tableKey = "linhym_${plantId}1"
+            val existingTableIds = mutableSetOf<String>()
+            if (rewardsTablesArr != null) {
+                for (i in 0 until rewardsTablesArr.length()) {
+                    existingTableIds.add(rewardsTablesArr.optJSONObject(i)?.optString("Id") ?: "")
+                }
+            }
 
-                // 1. Записываем слот в SlotConfigs
+            for (plantId in Pvz2Database.ALL_PLANT_IDS) {
+                val slotKey = "custom_seed_${plantId}_1"
+                val tableKey = "custom_table_${plantId}_1"
+
                 slotConfigsObj.put(slotKey, JSONObject().apply {
                     put("BonusTable", "bonus_standard")
                     put("PercentBonusAward", 0)
@@ -341,42 +350,54 @@ object Pvz2Manager {
                     put("Slots", JSONArray().put("PlantXP"))
                 })
 
-                // 2. Создаём отдельный объект CoreLoopRewardsTableProps в корневом массиве objects (если его ещё нет)
-                if (existingTableAliases.add(tableKey)) {
-                    val rewardEntry = JSONObject().apply {
-                        put("Amount", 1)
-                        put("Plant", plantId)
-                        put("Type", "PlantXP")
-                        put("Weight", 100)
-                    }
-                    val tableObj = JSONObject().apply {
-                        put("aliases", JSONArray().put(tableKey))
-                        put("objclass", "CoreLoopRewardsTableProps")
-                        put("objdata", JSONObject().apply {
-                            put("Rewards", JSONArray().put(rewardEntry))
-                        })
-                    }
-                    objects.put(tableObj)
+                if (rewardsTablesArr != null && existingTableIds.add(tableKey)) {
+                    rewardsTablesArr.put(JSONObject().apply {
+                        put("Id", tableKey)
+                        put("Rewards", JSONArray().put(JSONObject().apply {
+                            put("Max", 1)
+                            put("Min", 1)
+                            put("Plant", plantId)
+                            put("Type", "PlantXP")
+                            put("Weight", 100)
+                        }))
+                    })
                 }
             }
         }
 
-        return writeJsonAsRton(path, json, log)
+        writeJsonAsRton(path, json, log)
     }
 
-    // ИСПРАВЛЕНО:
-    // 1. Никаких "MISSING" — в LawnDescription и LawnShortDescription передаётся реальный ключ локализации растения (UPPERCASE ID).
-    // 2. Иконка самого растения вместо пиньяты — для пакетов семян добавляется поле "UseImageFromPlant": plantId!
-    // 3. Сохраняются все стандартные наборы (Bundles) из игры + все наборы из products.json (Total, AllPremium, Premium, Gemium, Mints, Seasonal)!
+    // Сохраняет все дефолтные наборы игры (переводя их в 1 монету) + добавляет 214 растений, 342 скина и рабочие семена с иконками растений!
     private fun buildProductsAndMarketScheduleJson(
         cdnDir: String,
         log: (String) -> Unit
     ): Pair<JSONObject, JSONObject> {
         val origProductsJson = readRtonAsJson("$cdnDir/products.rton", log)
-        val origSchedJson = readRtonAsJson("$cdnDir/market_schedule.rton", log)
+        val origScheduleJson = readRtonAsJson("$cdnDir/market_schedule.rton", log)
 
         val productsArr = JSONArray()
         val addedSkus = mutableSetOf<String>()
+
+        // 1. СНАЧАЛА БЕРЕЖНО СОХРАНЯЕМ ВСЕ ОРИГИНАЛЬНЫЕ ТОВАРЫ И НАБОРЫ ИГРЫ ИЗ PRODUCTS.RTON (с ценой 1 монета)
+        val origObjects = origProductsJson?.optJSONArray("objects")
+        if (origObjects != null) {
+            for (i in 0 until origObjects.length()) {
+                val obj = origObjects.getJSONObject(i)
+                val data = obj.optJSONObject("objdata")
+                if (data != null) {
+                    val sku = data.optString("Sku", "")
+                    if (sku.isNotEmpty()) addedSkus.add(sku)
+                    data.put("PriceCoins", "1")
+                    data.put("PriceGems", 0)
+                    data.put("PriceMints", 0)
+                    data.put("Price", 0)
+                    data.put("IsFree", false)
+                    data.put("IsAdPlacement", false)
+                }
+                productsArr.put(obj)
+            }
+        }
 
         fun addStoreProduct(
             sku: String,
@@ -386,14 +407,17 @@ object Pvz2Manager {
             objectType: String,
             objectItem: String,
             objectCount: Int,
-            useImageFromPlant: String? = null,
+            artCenter: String = "",
             bundleProps: JSONArray? = null
         ) {
             if (!addedSkus.add(sku)) return
             val objData = JSONObject().apply {
                 if (bundleProps != null) put("BundleProps", bundleProps)
+                if (artCenter.isNotEmpty()) put("ArtCenter", artCenter)
+                put("IsAdPlacement", false)
                 put("IsFree", false)
                 put("IsOneTimePurchase", false)
+                // Используем официальные ключи локализации из LawnStrings (без текста MISSING!)
                 put("LawnDescription", descKey)
                 put("LawnShortDescription", shortDescKey)
                 put("Name", name)
@@ -401,10 +425,6 @@ object Pvz2Manager {
                 put("ObjectCount", objectCount)
                 put("ObjectItem", objectItem)
                 put("ObjectType", objectType)
-                if (useImageFromPlant != null) {
-                    // Ключевой параметр движка PvZ 2, который ставит иконку конкретного растения вместо иконки пиньяты!
-                    put("UseImageFromPlant", useImageFromPlant)
-                }
                 put("PriceCoins", "1")
                 put("OneTimeDays", 0)
                 put("Sku", sku)
@@ -424,7 +444,6 @@ object Pvz2Manager {
         val scheduledUpgrades = JSONArray()
         val scheduledResources = JSONArray()
         val scheduledBundles = JSONArray()
-        val scheduledPinatas = JSONArray()
 
         fun makeScheduleEntry(category: String, sku: String): JSONObject {
             return JSONObject().apply {
@@ -434,8 +453,8 @@ object Pvz2Manager {
                 put("ABTest", "")
                 put("PromotionGroup", "")
                 put("AdditionalSegment", "")
-                put("SoftCurrency", "")
-                put("SoftCost", -1)
+                put("SoftCurrency", "coins")
+                put("SoftCost", 1)
                 put("MaxPurchase", -1)
                 put("SoftCostPerPurchase", -1)
                 put("Visuals", "RTID(0)")
@@ -443,21 +462,22 @@ object Pvz2Manager {
             }
         }
 
-        // 1. Все 214 Растений и их Пакеты Семян (с иконкой самого растения и реальным ключом локализации без MISSING!)
-        val allPlantSkus = JSONArray()
+        // 2. ДОБАВЛЯЕМ ВСЕ 214 РАСТЕНИЙ И ИХ НАБОРЫ СЕМЯН (С ИКОНКОЙ РАСТЕНИЯ И РАБОЧЕЙ ВЫДАЧЕЙ!)
+        val allPlantSkusForBundle = JSONArray()
         Pvz2Database.ALL_PLANT_IDS.forEachIndexed { index, plantId ->
-            val upper = plantId.uppercase()
-            val plantSku = "linhym.Plant.$plantId"
-            allPlantSkus.put(plantSku)
+            val upperKey = plantId.uppercase()
+            val plantSku = "custom.plant.$plantId"
+            allPlantSkusForBundle.put(plantSku)
 
             addStoreProduct(
                 sku = plantSku,
                 name = "Plant - $plantId",
-                descKey = upper,
-                shortDescKey = upper,
+                descKey = upperKey,
+                shortDescKey = upperKey,
                 objectType = "plant",
                 objectItem = plantId,
-                objectCount = 1
+                objectCount = 1,
+                artCenter = plantId
             )
             scheduledPlants.put(makeScheduleEntry("Plants", plantSku))
 
@@ -472,63 +492,41 @@ object Pvz2Manager {
                 else -> scheduledSeeds1
             }
 
+            // Создаем наборы семян (1, 100, 10000, 100000, 1000000) с нативным типом "seedpacket" и ArtCenter = plantId!
+            // Благодаря этому у каждого пакета семян рисуется иконка самого растения, нет надписи MISSING, и семена сразу начисляются!
             for (amt in Pvz2Database.SEED_PACK_AMOUNTS) {
-                val seedSku = "linhym.SeedPacket.$plantId.$amt"
+                val seedSku = "custom.seed.$plantId.$amt"
                 addStoreProduct(
                     sku = seedSku,
                     name = "SeedPacket - $plantId x$amt",
-                    // Передаём точный ключ локализации растения (UPPERCASE), чтобы на карточке было имя растения, а не MISSING!
-                    descKey = upper,
-                    shortDescKey = upper,
-                    objectType = "pinata",
-                    objectItem = "free_linhym_${plantId}1",
+                    descKey = upperKey,
+                    shortDescKey = upperKey,
+                    objectType = "seedpacket",
+                    objectItem = plantId,
                     objectCount = amt,
-                    // Принудительно рисуем иконку самого растения вместо пиньяты!
-                    useImageFromPlant = plantId
+                    artCenter = plantId
                 )
                 targetSeedArr.put(makeScheduleEntry(targetSeedCat, seedSku))
             }
         }
 
-        // 2. Все фирменные наборы (Bundles) из твоего products.json + сохранение всех дефолтных наборов игры!
-        val mintSkus = JSONArray().apply {
-            listOf(
-                "filamint", "peppermint", "wintermint", "enlightenmint", "reinforcemint",
-                "bombardmint", "ailmint", "enchantmint", "containmint", "enforcemint",
-                "armamint", "concealmint", "spearmint", "appeasemint"
-            ).forEach { put("linhym.Plant.$it") }
-        }
-        val newestSkus = JSONArray().apply {
-            listOf(
-                "pyroak", "thornwhip", "voltsnapdragon", "sakura", "blazingknight",
-                "rose", "brainstem", "lemonaid", "sourshot", "devourbloom",
-                "seashooter", "cornfetti", "hammeruit", "sweetheartsnare", "znakelily", "frostbonnet"
-            ).forEach { put("linhym.Plant.$it") }
-        }
-
-        val customBundles = listOf(
-            Triple("linhym.Bundle.Total", "greenthumb", allPlantSkus),
-            Triple("linhym.Bundle.AllPremium", "kiwibeastbundle", allPlantSkus),
-            Triple("linhym.Bundle.Mints", "dragonshoard", mintSkus),
-            Triple("linhym.Bundle.chineseplants", "transformation", newestSkus)
+        // 3. Мега-Набор всех растений
+        val totalBundleSku = "custom.bundle.all_plants"
+        addStoreProduct(
+            sku = totalBundleSku,
+            name = "Bundle - All 214 Plants",
+            descKey = "STORE_CATEGORY_BUNDLES",
+            shortDescKey = "STORE_CATEGORY_PLANTS",
+            objectType = "bundle",
+            objectItem = "greenthumb",
+            objectCount = 1,
+            bundleProps = allPlantSkusForBundle
         )
-        for ((bSku, iconItem, bProps) in customBundles) {
-            addStoreProduct(
-                sku = bSku,
-                name = bSku,
-                descKey = "STORE_CATEGORY_DAILY_OFFERS",
-                shortDescKey = "STORE_CATEGORY_DAILY_OFFERS",
-                objectType = "bundle",
-                objectItem = iconItem,
-                objectCount = 1,
-                bundleProps = bProps
-            )
-            scheduledBundles.put(makeScheduleEntry("Bundles", bSku))
-        }
+        scheduledBundles.put(makeScheduleEntry("Bundles", totalBundleSku))
 
-        // 3. Все 342 Костюма во вкладке Costumes за 1 монету (с ключом ALMANAC_COSTUME_DIALOG_TITLE без MISSING)
+        // 4. Все 342 Костюма
         for (costumeId in 1..342) {
-            val cSku = "linhym.Costume.$costumeId"
+            val cSku = "custom.costume.$costumeId"
             addStoreProduct(
                 sku = cSku,
                 name = "Costume $costumeId",
@@ -541,14 +539,14 @@ object Pvz2Manager {
             scheduledCostumes.put(makeScheduleEntry("Costumes", cSku))
         }
 
-        // 4. Все 40 Апгрейдов во вкладке Upgrades
+        // 5. Все 40 Игровых Апгрейдов
         for (upgId in Pvz2Database.GAME_UPGRADES) {
-            val uSku = "linhym.Upgrade.$upgId"
+            val uSku = "custom.upgrade.$upgId"
             addStoreProduct(
                 sku = uSku,
                 name = "Upgrade - $upgId",
                 descKey = "STORE_CATEGORY_DAILY_OFFERS",
-                shortDescKey = "STORE_CATEGORY_DAILY_OFFERS",
+                shortDescKey = "STORE_TAB_UPGRADES",
                 objectType = "gameupgrade",
                 objectItem = upgId,
                 objectCount = 1
@@ -556,22 +554,22 @@ object Pvz2Manager {
             scheduledUpgrades.put(makeScheduleEntry("Upgrades", uSku))
         }
 
-        // 5. Валюты и Ресурсы (Coins, Gems, Mints, Tickets, Fuel, Sprouts) с родными ключами локализации игры
+        // 6. Пакеты ресурсов (Монеты, Алмазы, Мяты, Перчатки, Топливо, Ростки)
         val resourceDefs = listOf(
-            Triple("Coin", "coin", "Coins" to "COIN_STORE_TEXT"),
-            Triple("Gem", "gem", "Gems" to "PRODUCT_GEMS_1800_CONSUME_S"),
-            Triple("Mint", "mint", "Mint" to "STORE_TAB_MINTS"),
-            Triple("Ticket", "ticket", "Tickets" to "STORE_TAB_GAUNTLETS"),
-            Triple("Fuel", "fuel", "Fuel" to "STORE_TAB_FUEL"),
-            Triple("Sprout", "sprout", "Sprouts" to "STORE_TAB_SPROUTS")
+            Triple("coin", "Coins", "COIN_STORE_TEXT"),
+            Triple("gem", "Gems", "PRODUCT_GEMS_1800_CONSUME_S"),
+            Triple("mint", "Mint", "STORE_TAB_MINTS"),
+            Triple("ticket", "Tickets", "STORE_TAB_GAUNTLETS"),
+            Triple("fuel", "Fuel", "STORE_TAB_FUEL"),
+            Triple("sprout", "Sprouts", "STORE_TAB_SPROUTS")
         )
-        for ((prefix, objType, catAndKey) in resourceDefs) {
-            val (catName, locKey) = catAndKey
-            for (amt in listOf(100, 1000, 10000, 100000, 1000000, 10000000)) {
-                val rSku = "linhym.$prefix.$amt"
+        val resourceAmounts = listOf(1000, 10000, 100000, 1000000, 10000000)
+        for ((objType, catName, locKey) in resourceDefs) {
+            for (amt in resourceAmounts) {
+                val rSku = "custom.resource.$objType.$amt"
                 addStoreProduct(
                     sku = rSku,
-                    name = "$prefix $amt",
+                    name = "$catName x$amt",
                     descKey = locKey,
                     shortDescKey = locKey,
                     objectType = objType,
@@ -582,66 +580,48 @@ object Pvz2Manager {
             }
         }
 
-        // 6. ВОЗВРАЩАЕМ ВСЕ ДЕФОЛТНЫЕ НАБОРЫ (BUNDLES) И ТОВАРЫ ИГРЫ ИЗ ОРИГИНАЛЬНОГО PRODUCTS.RTON ЗА 1 МОНЕТУ!
-        val origArr = origProductsJson?.optJSONArray("objects")
-        if (origArr != null) {
-            for (i in 0 until origArr.length()) {
-                val obj = origArr.getJSONObject(i)
-                val data = obj.optJSONObject("objdata") ?: continue
-                val sku = data.optString("Sku", "")
-                if (sku.isNotEmpty() && addedSkus.add(sku)) {
-                    // Делаем каждый родной набор и товар игры за 1 монету!
-                    data.put("PriceCoins", "1")
-                    data.put("PriceGems", 0)
-                    data.put("PriceMints", 0)
-                    data.put("Price", 0)
-                    data.put("IsFree", false)
-                    productsArr.put(obj)
-
-                    val objType = data.optString("ObjectType", "").lowercase()
-                    if (objType == "bundle" || data.has("BundleProps")) {
-                        scheduledBundles.put(makeScheduleEntry("Bundles", sku))
-                    } else if (objType == "pinata") {
-                        scheduledPinatas.put(makeScheduleEntry("Pinatas", sku))
-                    }
-                }
-            }
-        }
-
         val finalProductsJson = JSONObject().apply {
             put("version", 1)
             put("objects", productsArr)
         }
 
-        // Собираем расписание магазина + сохраняем все оригинальные записи расписания (дефолтные наборы и акции игры)
-        val entriesArr = JSONArray().apply {
-            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Bundles").put("ScheduledProducts", scheduledBundles))
-            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Plants").put("ScheduledProducts", scheduledPlants))
-            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds2").put("ScheduledProducts", scheduledSeeds2))
-            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds3").put("ScheduledProducts", scheduledSeeds3))
-            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds").put("ScheduledProducts", scheduledSeeds1))
-            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Costumes").put("ScheduledProducts", scheduledCostumes))
-            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Upgrades").put("ScheduledProducts", scheduledUpgrades))
-            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Resources").put("ScheduledProducts", scheduledResources))
-            if (scheduledPinatas.length() > 0) {
-                put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Pinatas").put("ScheduledProducts", scheduledPinatas))
-            }
-        }
-
-        // Добавляем дефолтные записи из оригинального market_schedule.rton, чтобы все родные наборы игры тоже оставались на местах
-        val origSchedObjects = origSchedJson?.optJSONArray("objects")
+        // 7. СОХРАНЯЕМ ВСЕ ОРИГИНАЛЬНЫЕ НАБОРЫ И РАСПИСАНИЯ ИЗ MARKET_SCHEDULE.RTON (с ценой 1 монета) + ДОБАВЛЯЕМ НАШИ ВКЛАДКИ
+        val entriesArr = JSONArray()
+        val origSchedObjects = origScheduleJson?.optJSONArray("objects")
         if (origSchedObjects != null && origSchedObjects.length() > 0) {
-            val origEntries = origSchedObjects.getJSONObject(0).optJSONObject("objdata")?.optJSONArray("MarketScheduleEntries")
-            if (origEntries != null) {
-                for (i in 0 until origEntries.length()) {
-                    val entry = origEntries.getJSONObject(i)
-                    val entryName = entry.optString("Name", "")
-                    if (entryName != "Plants" && entryName != "Seeds" && entryName != "Seeds2" && entryName != "Seeds3" && entryName != "Costumes") {
-                        entriesArr.put(entry)
+            val existingEntries = origSchedObjects.getJSONObject(0)
+                .optJSONObject("objdata")
+                ?.optJSONArray("MarketScheduleEntries")
+            if (existingEntries != null) {
+                for (i in 0 until existingEntries.length()) {
+                    val entry = existingEntries.getJSONObject(i)
+                    // Делаем все стандартные предложения активными навсегда и за 1 монету
+                    entry.put("StartDateTime", 0)
+                    entry.put("EndDateTime", 0)
+                    val schedProds = entry.optJSONArray("ScheduledProducts")
+                    if (schedProds != null) {
+                        for (j in 0 until schedProds.length()) {
+                            val sp = schedProds.getJSONObject(j)
+                            sp.put("SoftCurrency", "coins")
+                            sp.put("SoftCost", 1)
+                            sp.put("MaxPurchase", -1)
+                            sp.put("SoftCostPerPurchase", -1)
+                        }
                     }
+                    entriesArr.put(entry)
                 }
             }
         }
+
+        // Дописываем наши полные вкладки
+        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Plants").put("ScheduledProducts", scheduledPlants))
+        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds2").put("ScheduledProducts", scheduledSeeds2))
+        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds3").put("ScheduledProducts", scheduledSeeds3))
+        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds").put("ScheduledProducts", scheduledSeeds1))
+        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Costumes").put("ScheduledProducts", scheduledCostumes))
+        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Bundles").put("ScheduledProducts", scheduledBundles))
+        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Upgrades").put("ScheduledProducts", scheduledUpgrades))
+        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Resources").put("ScheduledProducts", scheduledResources))
 
         val finalScheduleJson = JSONObject().apply {
             put("version", 1)
@@ -655,7 +635,7 @@ object Pvz2Manager {
         return finalProductsJson to finalScheduleJson
     }
 
-    // ==================== 2. МОД: 0 СОЛНЦА И МГНОВЕННАЯ ПЕРЕЗАРЯДКА ====================
+    // ==================== 2. ИСПРАВЛЕННЫЙ МОД: 0 СОЛНЦА И МГНОВЕННАЯ ПЕРЕЗАРЯДКА ====================
 
     fun patchZeroSunAndInstantCooldown(cdnDir: String, log: (String) -> Unit): Boolean {
         val propsPath = "$cdnDir/PlantProperties.rton"
@@ -671,7 +651,7 @@ object Pvz2Manager {
             if (writeJsonAsRton(levelsPath, json, log)) anyPatched = true
         }
         if (anyPatched) {
-            log("🌞 Мод успешно применён: все растения стоят 0 солнца и перезаряжаются за 0 сек!")
+            log("🌞 Мод успешно применён (FloatStats + BaseProps): все растения стоят 0 солнца и перезаряжаются за 0 сек на любом уровне!")
         }
         return anyPatched
     }
