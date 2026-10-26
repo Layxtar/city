@@ -14,9 +14,8 @@ object Pvz2Database {
         "s" to "🌱 Ростки Сада Дзен (Sprouts)"
     )
 
-    // Полный список всех 214 растений из твоего magento_filter.json и products.json (включая самые новые!)
+    // Полный список всех 214 растений (включая самые новые: pyroak/Scorchoak, thornwhip, voltsnapdragon и др.)
     val ALL_PLANT_IDS = listOf(
-        // Самые новые растения (включая Scorchoak = pyroak)
         "pyroak", "thornwhip", "voltsnapdragon", "sakura", "blazingknight",
         "rose", "brainstem", "lemonaid", "sourshot", "devourbloom",
         "seashooter", "cornfetti", "hammeruit", "sweetheartsnare", "znakelily",
@@ -65,7 +64,7 @@ object Pvz2Database {
         "sunflower"
     )
 
-    // Все 40 игровых апгрейдов из magento_filter.json и products.json
+    // Все 40 игровых апгрейдов
     val GAME_UPGRADES = listOf(
         "7_slots", "sunshovel_lvl1", "sunshovel_lvl2", "pf_refresh",
         "pf_slots_lvl1", "starting_sun_lvl1", "wallnut_firstaid", "manual_mowers_1",
@@ -84,10 +83,9 @@ object Pvz2Database {
         "world_trophy_modern", "feature_collectable_bacon"
     )
 
-    // Градации наборов семян для вкладок Seeds, Seeds2, Seeds3 в магазине (как в файлах LinhYM)
+    // Градации наборов семян для вкладок Seeds 1, Seeds 2, Seeds 3
     val SEED_PACK_AMOUNTS = listOf(1, 100, 10000, 100000, 1000000)
 
-    // Новейшие растения для наглядного отображения в UI
     val NEWEST_PLANTS_HIGHLIGHT = listOf(
         "pyroak" to "🔥 Scorchoak / Pyroak (Огненный дуб)",
         "thornwhip" to "🌿 Thornwhip (Шипастый кнут)",
