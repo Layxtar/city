@@ -163,48 +163,192 @@ object Pvz2Manager {
         return true
     }
 
-    private fun buildMagentoFilterJson(): JSONObject {
-        val plantSubTypes = JSONArray()
-        Pvz2Database.ALL_PLANT_IDS.forEach { plantSubTypes.put(it) }
+        private fun buildProductsAndMarketScheduleJson(): Pair<JSONObject, JSONObject> {
+        val productsArr = JSONArray()
 
-        val upgradeSubTypes = JSONArray()
-        Pvz2Database.GAME_UPGRADES.forEach { upgradeSubTypes.put(it) }
-
-        val costumeSubTypes = JSONArray()
-        for (i in 1..342) costumeSubTypes.put(i.toString())
-
-        val filters = JSONArray().apply {
-            put(JSONObject().put("Type", "coin").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "gem").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "ticket").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "fuel").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "mint").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "bundle").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "keygate").put("WarnEnsureRealMoneyOnly", true))
-            put(JSONObject().put("Type", "stargate").put("WarnEnsureRealMoneyOnly", true))
-            put(JSONObject().put("Type", "eventenergy").put("WarnEnsureGemsOnly", false))
-            put(JSONObject().put("Type", "crown").put("WarnEnsureRealMoneyOnly", true))
-            put(JSONObject().put("Type", "tapjoy").put("WarnEnsureGemsOnly", false))
-            put(JSONObject().put("Type", "iftoken").put("WarnEnsureRealMoneyOnly", true))
-            put(JSONObject().put("Type", "rewardmultiplier").put("WarnEnsureRealMoneyOnly", true))
-            put(JSONObject().put("Type", "sprout").put("WarnEnsureGemsOnly", false))
-            put(JSONObject().put("Type", "plant").put("SubTypeFilters", plantSubTypes))
-            put(JSONObject().put("Type", "gameupgrade").put("WarnEnsureRealMoneyOnly", false).put("SubTypeFilters", upgradeSubTypes))
-            put(JSONObject().put("Type", "costume").put("SubTypeFilters", costumeSubTypes))
-            put(JSONObject().put("Type", "pinata").put("WarnEnsureRealMoneyOnly", false))
+        fun addStoreProduct(
+            sku: String,
+            name: String,
+            desc: String,
+            shortDesc: String,
+            objectType: String,
+            objectItem: String,
+            objectCount: Int,
+            artCenter: String = "",
+            bundleProps: JSONArray? = null
+        ) {
+            val objData = JSONObject().apply {
+                if (bundleProps != null) put("BundleProps", bundleProps)
+                if (artCenter.isNotEmpty()) put("ArtCenter", artCenter)
+                put("IsAdPlacement", false)
+                put("IsFree", false)
+                put("IsOneTimePurchase", false)
+                put("LawnDescription", desc)
+                put("LawnShortDescription", shortDesc)
+                put("Name", name)
+                put("NoTooltip", false)
+                put("ObjectCount", objectCount)
+                put("ObjectItem", objectItem)
+                put("ObjectType", objectType)
+                put("PriceCoins", "1")
+                put("OneTimeDays", 0)
+                put("Sku", sku)
+            }
+            productsArr.put(JSONObject().apply {
+                put("aliases", JSONArray().put(sku))
+                put("objclass", "StoreProductProps")
+                put("objdata", objData)
+            })
         }
 
-        val sheetObj = JSONObject().apply {
-            put("objclass", "ProductFilterPropertySheet")
-            put("aliases", JSONArray().put("MagentoFilter"))
-            put("objdata", JSONObject().put("ObjectTypeFilters", filters))
+        val scheduledPlants = JSONArray()
+        val scheduledCostumes = JSONArray()
+        val scheduledSeeds1 = JSONArray()
+        val scheduledSeeds2 = JSONArray()
+        val scheduledSeeds3 = JSONArray()
+        val scheduledUpgrades = JSONArray()
+        val scheduledResources = JSONArray()
+        val scheduledBundles = JSONArray()
+        val scheduledPinatas = JSONArray()
+
+        fun makeScheduleEntry(category: String, sku: String): JSONObject {
+            return JSONObject().apply {
+                put("Comment", "")
+                put("Category", category)
+                put("Priority", "")
+                put("ABTest", "")
+                put("PromotionGroup", "")
+                put("AdditionalSegment", "")
+                put("SoftCurrency", "")
+                put("SoftCost", -1)
+                put("MaxPurchase", -1)
+                put("SoftCostPerPurchase", -1)
+                put("Visuals", "RTID(0)")
+                put("Sku", JSONArray().put(sku).put(sku))
+            }
         }
 
-        return JSONObject().apply {
+        val allPlantSkus = JSONArray()
+        val classicSeedTiers = listOf(1, 100, 10000)
+        val newestSeedTiers = listOf(1, 100, 10000, 100000, 1000000)
+
+        Pvz2Database.ALL_PLANT_IDS.forEachIndexed { index, plantId ->
+            val upper = plantId.uppercase()
+            val plantSku = "shop.Plant.$plantId"
+            allPlantSkus.put(plantSku)
+
+            // 1. Само растение для вкладки Plants
+            addStoreProduct(
+                sku = plantSku,
+                name = "Plant - $plantId",
+                desc = upper,
+                shortDesc = upper,
+                objectType = "plant",
+                objectItem = plantId,
+                objectCount = 1,
+                artCenter = plantId
+            )
+            scheduledPlants.put(makeScheduleEntry("Plants", plantSku))
+
+            val isNewest = index < 75
+            val targetCat = when {
+                index < 75 -> "Seeds2"
+                index < 145 -> "Seeds3"
+                else -> "Seeds"
+            }
+            val targetArr = when (targetCat) {
+                "Seeds2" -> scheduledSeeds2
+                "Seeds3" -> scheduledSeeds3
+                else -> scheduledSeeds1
+            }
+
+            val tiers = if (isNewest) newestSeedTiers else classicSeedTiers
+            for (amt in tiers) {
+                val seedSku = "shop.SeedPacket.$plantId.$amt"
+                // Прямой тип "seedpacket" гарантирует, что семена начисляются сразу при покупке без пиньят!
+                addStoreProduct(
+                    sku = seedSku,
+                    name = "SeedPacket - $plantId x$amt",
+                    desc = "$amt Seed Packets for $upper",
+                    shortDesc = upper,
+                    objectType = "seedpacket",
+                    objectItem = plantId,
+                    objectCount = amt,
+                    artCenter = plantId
+                )
+                targetArr.put(makeScheduleEntry(targetCat, seedSku))
+            }
+        }
+
+        // Бандлы и костюмы
+        val totalBundleSku = "shop.Bundle.Total"
+        addStoreProduct(
+            sku = totalBundleSku,
+            name = "Legendary Bundle - All Plants",
+            desc = "STORE_CATEGORY_BUNDLES",
+            shortDesc = "STORE_CATEGORY_PLANTS",
+            objectType = "bundle",
+            objectItem = "greenthumb",
+            objectCount = 1,
+            bundleProps = allPlantSkus
+        )
+        scheduledBundles.put(makeScheduleEntry("Bundles", totalBundleSku))
+
+        for (costumeId in 1..342) {
+            val cSku = "shop.Costume.$costumeId"
+            addStoreProduct(
+                sku = cSku,
+                name = "Costume $costumeId",
+                desc = "Costume $costumeId",
+                shortDesc = "ALMANAC_COSTUME_DIALOG_TITLE",
+                objectType = "costume",
+                objectItem = costumeId.toString(),
+                objectCount = 1
+            )
+            scheduledCostumes.put(makeScheduleEntry("Costumes", cSku))
+        }
+
+        for (upgId in Pvz2Database.GAME_UPGRADES) {
+            val uSku = "shop.Upgrade.$upgId"
+            addStoreProduct(
+                sku = uSku,
+                name = "Upgrade - $upgId",
+                desc = "STORE_CATEGORY_DAILY_OFFERS",
+                shortDesc = upgId,
+                objectType = "gameupgrade",
+                objectItem = upgId,
+                objectCount = 1
+            )
+            scheduledUpgrades.put(makeScheduleEntry("Upgrades", uSku))
+        }
+
+        val finalProductsJson = JSONObject().apply {
             put("version", 1)
-            put("objects", JSONArray().put(sheetObj))
+            put("objects", productsArr)
         }
+
+        val entriesArr = JSONArray().apply {
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Bundles").put("ScheduledProducts", scheduledBundles))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Plants").put("ScheduledProducts", scheduledPlants))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds").put("ScheduledProducts", scheduledSeeds1))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds2").put("ScheduledProducts", scheduledSeeds2))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds3").put("ScheduledProducts", scheduledSeeds3))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Costumes").put("ScheduledProducts", scheduledCostumes))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Upgrades").put("ScheduledProducts", scheduledUpgrades))
+        }
+
+        val finalScheduleJson = JSONObject().apply {
+            put("version", 1)
+            put("objects", JSONArray().put(JSONObject().apply {
+                put("aliases", JSONArray().put("MainMarketSchedule"))
+                put("objclass", "MarketScheduleProps")
+                put("objdata", JSONObject().put("MarketScheduleEntries", entriesArr))
+            }))
+        }
+
+        return finalProductsJson to finalScheduleJson
     }
+
 
     // Точная структура market_layout.json (без несуществующих ключей в квадратных скобках, вызывавших MISSING!)
     private fun buildMarketLayoutJson(): JSONObject {
