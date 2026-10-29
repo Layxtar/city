@@ -110,7 +110,7 @@ object ClassicCryptoAndSyncManager {
                 version to JSONObject(if (dataStr.startsWith("{")) dataStr else decryptBase64Data(dataStr))
             } else version to outerJson
         } catch (e: Exception) {
-            log("⚠️ Ошибка чтения $fileName:${e.message}")
+            log("⚠️ Ошибка чтения $fileName: ${e.message}")
             defaultVer to createDefaultStructureForFile(fileName)
         }
     }
@@ -122,7 +122,7 @@ object ClassicCryptoAndSyncManager {
             val wrapper = JSONObject().put("version", version).put("data", encryptToBase64Data(innerJson.toString()))
             CryptoAndSyncManager.writeFileViaShizuku(path, wrapper.toString().toByteArray(Charsets.UTF_8), log)
         } catch (e: Exception) {
-            log("❌ Ошибка записи $fileName:${e.message}")
+            log("❌ Ошибка записи $fileName: ${e.message}")
             false
         }
     }
@@ -144,6 +144,7 @@ object ClassicCryptoAndSyncManager {
                         put("id", "jake")
                         put("ownedOutfits", JSONArray().put("default"))
                         put("lastOutfit", "default")
+                        put("isSeen", true)
                     }))
                     put("selected", JSONObject().put("character", "jake").put("outfit", "default"))
                 }
@@ -152,15 +153,16 @@ object ClassicCryptoAndSyncManager {
                     put("owned", JSONObject().put("default", JSONObject().apply {
                         put("id", "default")
                         put("ownedUpgrades", JSONObject())
+                        put("isSeen", true)
                     }))
                     put("selected", "default")
                 }
                 "profile_portrait.json" -> {
-                    put("owned", JSONObject().put("portrait_jake_default", JSONObject().apply {
-                        put("id", "portrait_jake_default")
+                    put("owned", JSONObject().put("jake_portrait", JSONObject().apply {
+                        put("id", "jake_portrait")
                         put("isSeen", true)
                     }))
-                    put("selected", "portrait_jake_default")
+                    put("selected", "jake_portrait")
                 }
                 "profile_frame.json" -> {
                     put("owned", JSONObject().put("default_frame", JSONObject().apply {
@@ -220,6 +222,19 @@ object ClassicCryptoAndSyncManager {
         obj.put("value", amount)
         currencies.put(id, obj)
         wallet.put("currencies", currencies)
+    }
+
+    // Починенная функция выдачи токенов персонажей (Jake, Tricky, Fresh, Yutani, Spike) + их авто-открытие
+    fun unlockAllTokenCharactersAndMaxTokens(state: ClassicMemoryState) {
+        val tokenIds = listOf("7", "8", "9", "10", "11")
+        for (tId in tokenIds) {
+            setCurrencyInMemory(state.wallet, tId, 999L)
+        }
+        val tokenChars = listOf("jake", "tricky", "fresh", "yutani", "spike")
+        for (charId in tokenChars) {
+            val outfits = ClassicDatabase.CLASSIC_SURFERS.find { it.first == charId }?.second?.second ?: listOf("default")
+            toggleSurferUnlock(state, charId, true, outfits)
+        }
     }
 
     fun setDoubleCoinsOnly(state: ClassicMemoryState, enabled: Boolean) {
@@ -375,7 +390,7 @@ object ClassicCryptoAndSyncManager {
         state.achievements.put("achievements", achObj)
     }
 
-    // ==================== РАМКИ И АВАТАРКИ (ПРАВИЛЬНАЯ СТРУКТУРА JSON) ====================
+    // ==================== РАМКИ И АВАТАРКИ (ТОЧНЫЕ ID ИЗ DECRYPTED_PLAYERPROFILE.JSON) ====================
 
     fun isPortraitUnlocked(state: ClassicMemoryState, portraitId: String): Boolean =
         state.portraits.optJSONObject("owned")?.has(portraitId) == true
@@ -386,7 +401,7 @@ object ClassicCryptoAndSyncManager {
         if (unlock) {
             owned.put(portraitId, JSONObject().put("id", portraitId).put("isSeen", true))
         } else {
-            if (portraitId != "portrait_jake_default") owned.remove(portraitId)
+            if (portraitId != "jake_portrait") owned.remove(portraitId)
         }
         state.portraits.put("owned", owned)
     }
@@ -435,7 +450,7 @@ object ClassicCryptoAndSyncManager {
         state.frames.put("owned", owned)
     }
 
-    // ==================== СЁРФЕРЫ И КОСТЮМЫ (СТРОГО СО СКИНОМ DEFAULT) ====================
+    // ==================== СЁРФЕРЫ И ИХ ПОД-СКИНЫ (КОСТЮМЫ) ====================
 
     fun isSurferUnlocked(state: ClassicMemoryState, surferId: String): Boolean =
         state.chars.optJSONObject("owned")?.has(surferId) == true
@@ -516,7 +531,7 @@ object ClassicCryptoAndSyncManager {
         state.chars.put("owned", owned)
     }
 
-    // ==================== ХОВЕРБОРДЫ (ВКЛЮЧАЯ TORITO И АПГРЕЙДЫ) ====================
+    // ==================== ХОВЕРБОРДЫ И АПГРЕЙДЫ ====================
 
     fun isBoardUnlocked(state: ClassicMemoryState, boardId: String): Boolean =
         state.boards.optJSONObject("owned")?.has(boardId) == true
@@ -581,13 +596,5 @@ object ClassicCryptoAndSyncManager {
             })
         }
         state.boards.put("owned", owned)
-    }
-
-    fun addLootboxesToQueueInMemory(state: ClassicMemoryState, boxId: String, count: Int) {
-        val queueObj = state.wallet.optJSONObject("lootboxQueue") ?: JSONObject()
-        val unopened = queueObj.optJSONArray("unopenedLootboxes") ?: JSONArray()
-        repeat(count) { unopened.put(JSONObject().put("id", boxId).put("source", "editor_gift")) }
-        queueObj.put("unopenedLootboxes", unopened)
-        state.wallet.put("lootboxQueue", queueObj)
     }
 }
