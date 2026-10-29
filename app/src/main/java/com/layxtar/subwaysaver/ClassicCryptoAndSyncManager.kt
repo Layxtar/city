@@ -110,7 +110,7 @@ object ClassicCryptoAndSyncManager {
                 version to JSONObject(if (dataStr.startsWith("{")) dataStr else decryptBase64Data(dataStr))
             } else version to outerJson
         } catch (e: Exception) {
-            log("⚠️ Ошибка чтения $fileName: ${e.message}")
+            log("⚠️ Ошибка чтения $fileName:${e.message}")
             defaultVer to createDefaultStructureForFile(fileName)
         }
     }
@@ -122,7 +122,7 @@ object ClassicCryptoAndSyncManager {
             val wrapper = JSONObject().put("version", version).put("data", encryptToBase64Data(innerJson.toString()))
             CryptoAndSyncManager.writeFileViaShizuku(path, wrapper.toString().toByteArray(Charsets.UTF_8), log)
         } catch (e: Exception) {
-            log("❌ Ошибка записи $fileName: ${e.message}")
+            log("❌ Ошибка записи $fileName:${e.message}")
             false
         }
     }
@@ -224,16 +224,48 @@ object ClassicCryptoAndSyncManager {
         wallet.put("currencies", currencies)
     }
 
-    // Починенная функция выдачи токенов персонажей (Jake, Tricky, Fresh, Yutani, Spike) + их авто-открытие
-    fun unlockAllTokenCharactersAndMaxTokens(state: ClassicMemoryState) {
-        val tokenIds = listOf("7", "8", "9", "10", "11")
-        for (tId in tokenIds) {
-            setCurrencyInMemory(state.wallet, tId, 999L)
+    // ==================== ЖЕТОНЫ ЛЕТУЧИХ МЫШЕК (SEASON HUNT TOKENS) ====================
+    // Синхронно читает и записывает жетоны охоты (летучих мышек) и в wallet.json, и в season_hunt.json!
+
+    fun getSeasonHuntBatTokens(state: ClassicMemoryState): Long {
+        val walletVal = state.wallet.optJSONObject("currencies")?.optJSONObject("12")?.optLong("value", 0L) ?: 0L
+        val shVal = state.seasonHunt.optLong("tokensCollected", state.seasonHunt.optLong("collectedTokens", 0L))
+        return maxOf(walletVal, shVal)
+    }
+
+    fun setSeasonHuntBatTokens(state: ClassicMemoryState, amount: Long) {
+        // 1. Записываем в wallet.json (сохраняя оригинальный contextData текущего сезона, если он уже есть)
+        setCurrencyInMemory(state.wallet, "12", amount)
+
+        // Если в wallet.json уже есть другие сезонные валюты (с expirationType != 0), обновляем их тоже
+        val currencies = state.wallet.optJSONObject("currencies")
+        if (currencies != null) {
+            val keys = currencies.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val cObj = currencies.optJSONObject(k) ?: continue
+                if (k == "12" || cObj.optInt("expirationType", 0) == 1 || cObj.optInt("contextType", 0) == 1) {
+                    cObj.put("value", amount)
+                }
+            }
         }
-        val tokenChars = listOf("jake", "tricky", "fresh", "yutani", "spike")
-        for (charId in tokenChars) {
-            val outfits = ClassicDatabase.CLASSIC_SURFERS.find { it.first == charId }?.second?.second ?: listOf("default")
-            toggleSurferUnlock(state, charId, true, outfits)
+
+        // 2. Синхронно записываем прогресс летучих мышек во все поля season_hunt.json
+        state.seasonHunt.put("tokensCollected", amount)
+        state.seasonHunt.put("collectedTokens", amount)
+        state.seasonHunt.put("currentPoints", amount)
+        state.seasonHunt.put("points", amount)
+
+        // Если в внутри season_hunt.json есть вложенный объект активного сезона (например, seasonData / activeSeason), обновляем и его
+        val shKeys = state.seasonHunt.keys().asSequence().toList()
+        for (k in shKeys) {
+            val sub = state.seasonHunt.optJSONObject(k) ?: continue
+            if (sub.has("tokensCollected")) sub.put("tokensCollected", amount)
+            if (sub.has("collectedTokens")) sub.put("collectedTokens", amount)
+            if (sub.has("points")) sub.put("points", amount)
+            if (sub.has("currentPoints")) sub.put("currentPoints", amount)
+            // Снимаем блокировку ожидания по дням (таймер закрытых ярусов)
+            if (sub.has("unlockedTier")) sub.put("unlockedTier", 40)
         }
     }
 
@@ -390,7 +422,7 @@ object ClassicCryptoAndSyncManager {
         state.achievements.put("achievements", achObj)
     }
 
-    // ==================== РАМКИ И АВАТАРКИ (ТОЧНЫЕ ID ИЗ DECRYPTED_PLAYERPROFILE.JSON) ====================
+    // ==================== РАМКИ И АВАТАРКИ ====================
 
     fun isPortraitUnlocked(state: ClassicMemoryState, portraitId: String): Boolean =
         state.portraits.optJSONObject("owned")?.has(portraitId) == true
@@ -450,7 +482,7 @@ object ClassicCryptoAndSyncManager {
         state.frames.put("owned", owned)
     }
 
-    // ==================== СЁРФЕРЫ И ИХ ПОД-СКИНЫ (КОСТЮМЫ) ====================
+    // ==================== СЁРФЕРЫ И КОСТЮМЫ ====================
 
     fun isSurferUnlocked(state: ClassicMemoryState, surferId: String): Boolean =
         state.chars.optJSONObject("owned")?.has(surferId) == true
