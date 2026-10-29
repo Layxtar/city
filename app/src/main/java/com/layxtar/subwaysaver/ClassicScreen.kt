@@ -62,14 +62,18 @@ fun ClassicScreen(
     var expandedSurferId by remember { mutableStateOf<String?>(null) }
     var expandedBoardId by remember { mutableStateOf<String?>(null) }
 
-    // Поиск и фильтр для вкладки Рамок и Аватарок
     var profileItemsSearch by remember { mutableStateOf("") }
     var profileItemsFilter by remember { mutableStateOf("Все") }
 
     fun applyUIToState(st: ClassicMemoryState) {
         for ((id, valStr) in classicCurrencies) {
             val amount = valStr.toLongOrNull() ?: 0L
-            ClassicCryptoAndSyncManager.setCurrencyInMemory(st.wallet, id, amount)
+            if (id == "12") {
+                // Синхронная запись Жетонов Летучих Мышек (Season Hunt) и в wallet.json, и в season_hunt.json!
+                ClassicCryptoAndSyncManager.setSeasonHuntBatTokens(st, amount)
+            } else {
+                ClassicCryptoAndSyncManager.setCurrencyInMemory(st.wallet, id, amount)
+            }
         }
         val medalsMap = mapOf(
             "106" to (medalBronze.toIntOrNull() ?: 0),
@@ -84,8 +88,12 @@ fun ClassicScreen(
     fun refreshUIFromState(st: ClassicMemoryState) {
         val currencies = st.wallet.optJSONObject("currencies")
         for ((id, _) in ClassicDatabase.CURRENCIES) {
-            val v = currencies?.optJSONObject(id)?.optLong("value", 0L) ?: 0L
-            classicCurrencies[id] = v.toString()
+            if (id == "12") {
+                classicCurrencies["12"] = ClassicCryptoAndSyncManager.getSeasonHuntBatTokens(st).toString()
+            } else {
+                val v = currencies?.optJSONObject(id)?.optLong("value", 0L) ?: 0L
+                classicCurrencies[id] = v.toString()
+            }
         }
         doubleCoinsOnly = ClassicCryptoAndSyncManager.isDoubleCoinsEnabled(st)
         val medals = ClassicCryptoAndSyncManager.getTopRunMedals(st)
@@ -134,7 +142,7 @@ fun ClassicScreen(
             undoStack.clear()
             refreshUIFromState(loaded)
             isLoaded = true
-            log("✅ Classic загружен (Монет: ${classicCurrencies["1"]}, Ключей: ${classicCurrencies["2"]})!")
+            log("✅ Classic загружен (Монет: ${classicCurrencies["1"]}, Ключей: ${classicCurrencies["2"]}, Мышек: ${classicCurrencies["12"]})!")
             isBusy = false
         }
     }
@@ -165,13 +173,11 @@ fun ClassicScreen(
     val st = classicState
     val _trig = uiTrigger
 
-    // ==================== ТОЧНЫЕ ЖИВЫЕ СЧЁТЧИКИ ВСЕХ КОЛЛЕКЦИЙ ====================
     val totalSurfersCount = ClassicDatabase.CLASSIC_SURFERS.size
     val unlockedSurfersCount = remember(st, uiTrigger) {
         if (st == null) 0 else ClassicDatabase.CLASSIC_SURFERS.count { ClassicCryptoAndSyncManager.isSurferUnlocked(st, it.first) }
     }
 
-    // Счётчик всех дополнительных подскинов (костюмов кроме default)
     val totalSubOutfitsCount = remember {
         ClassicDatabase.CLASSIC_SURFERS.sumOf { (_, pair) -> pair.second.count { it != "default" } }
     }
@@ -182,7 +188,6 @@ fun ClassicScreen(
         }
     }
 
-    // Счётчик досок и способностей досок
     val totalBoardsCount = ClassicDatabase.CLASSIC_BOARDS.size
     val unlockedBoardsCount = remember(st, uiTrigger) {
         if (st == null) 0 else ClassicDatabase.CLASSIC_BOARDS.count { ClassicCryptoAndSyncManager.isBoardUnlocked(st, it.first) }
@@ -197,7 +202,6 @@ fun ClassicScreen(
         }
     }
 
-    // Счётчик рамок и аватарок
     val totalFramesCount = ClassicDatabase.ALL_FRAMES.size
     val unlockedFramesCount = remember(st, uiTrigger) {
         if (st == null) 0 else ClassicDatabase.ALL_FRAMES.count { ClassicCryptoAndSyncManager.isFrameUnlocked(st, it.first) }
@@ -274,7 +278,7 @@ fun ClassicScreen(
                 }
             } else {
                 when (selectedTab) {
-                    // ВКЛАДКА 0: КОШЕЛЁК И ТОКЕН-ПЕРСОНАЖИ
+                    // ВКЛАДКА 0: КОШЕЛЁК И ЖЕТОНЫ ЛЕТУЧИХ МЫШЕК (БЕЗ ЖЕТОНОВ ПЕРСОНАЖЕЙ)
                     0 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -315,21 +319,13 @@ fun ClassicScreen(
                                             pushUndo()
                                             ClassicCryptoAndSyncManager.setCurrencyInMemory(st.wallet, "1", 9999999L)
                                             ClassicCryptoAndSyncManager.setCurrencyInMemory(st.wallet, "2", 999999L)
+                                            ClassicCryptoAndSyncManager.setSeasonHuntBatTokens(st, 5000L)
                                             classicCurrencies["1"] = "9999999"
                                             classicCurrencies["2"] = "999999"
-                                            log("💎 9.99M Монет и 999K Ключей начислено!")
-                                        }) { Text("💎 Монеты + Ключи MAX", fontSize = 11.sp) }
+                                            classicCurrencies["12"] = "5000"
+                                            log("💎 Монеты, Ключи и 5 000 Летучих Мышек начислены!")
+                                        }) { Text("💎 Валюты + 5000 Мышек", fontSize = 11.sp) }
                                     }
-
-                                    Button(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        onClick = {
-                                            pushUndo()
-                                            ClassicCryptoAndSyncManager.unlockAllTokenCharactersAndMaxTokens(st)
-                                            uiTrigger++
-                                            log("🎸 Все 5 токен-персонажей (Jake, Tricky, Fresh, Yutani, Spike) и их токены открыты!")
-                                        }
-                                    ) { Text("🎸 Открыть токен-персонажей (Tricky, Fresh, Yutani, Spike)", fontSize = 11.sp) }
                                 }
                             }
 
@@ -475,7 +471,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 2: СЁРФЕРЫ И ПОДСКИНЫ (С ТОЧНЫМИ СЧЁТЧИКАМИ)
+                    // ВКЛАДКА 2: СЁРФЕРЫ И ПОДСКИНЫ
                     2 -> {
                         val filteredSurfers = remember(searchQuery, surferCollectionFilter, uiTrigger) {
                             ClassicDatabase.CLASSIC_SURFERS.filter { (id, pair) ->
@@ -640,7 +636,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 3: ДОСКИ (FIRE STARTER, TORITO, SMOKING SLIME И ДР. + СЧЁТЧИКИ)
+                    // ВКЛАДКА 3: ДОСКИ
                     3 -> {
                         val filteredBoards = remember(searchQuery, boardFilterMode, uiTrigger) {
                             ClassicDatabase.CLASSIC_BOARDS.filter { (id, pair) ->
@@ -977,7 +973,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 5: ДОСТИЖЕНИЯ (БЕЗ НЕРАБОЧИХ ЛУТБОКСОВ)
+                    // ВКЛАДКА 5: ДОСТИЖЕНИЯ
                     5 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
