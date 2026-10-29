@@ -75,6 +75,14 @@ object ClassicCryptoAndSyncManager {
 
     private val ZERO_IV = ByteArray(16)
 
+    private val DEFAULT_FILE_VERSIONS = mapOf(
+        "wallet.json" to 3, "user_stats.json" to 2, "ad_placements.json" to 2,
+        "season_hunt.json" to 2, "generic_challenges.json" to 2, "boards_inventory.json" to 2,
+        "characters_inventory.json" to 3, "upgrades.json" to 2, "achievements.json" to 1,
+        "quests.json" to 1, "city_tour.json" to 1, "missions.json" to 1, "trophies.json" to 1,
+        "profile_portrait.json" to 1, "profile_frame.json" to 1
+    )
+
     fun decryptBase64Data(base64Data: String): String {
         val encryptedBytes = Base64.decode(base64Data.trim(), Base64.DEFAULT)
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
@@ -90,18 +98,20 @@ object ClassicCryptoAndSyncManager {
     }
 
     fun readClassicJson(fileName: String, log: (String) -> Unit): Pair<Int, JSONObject> {
+        val defaultVer = DEFAULT_FILE_VERSIONS[fileName] ?: 1
         val path = "$CLASSIC_PROFILE_DIR/$fileName"
         val rawBytes = CryptoAndSyncManager.readFileViaShizuku(path, log)
-        if (rawBytes == null || rawBytes.isEmpty()) return 1 to JSONObject()
+        if (rawBytes == null || rawBytes.isEmpty()) return defaultVer to createDefaultStructureForFile(fileName)
         return try {
             val outerJson = JSONObject(String(rawBytes, Charsets.UTF_8).trim())
-            val version = outerJson.optInt("version", 1)
+            val version = outerJson.optInt("version", defaultVer)
             if (outerJson.has("data") && outerJson.opt("data") is String) {
                 val dataStr = outerJson.getString("data").trim()
                 version to JSONObject(if (dataStr.startsWith("{")) dataStr else decryptBase64Data(dataStr))
             } else version to outerJson
-        } catch (_: Exception) {
-            1 to JSONObject()
+        } catch (e: Exception) {
+            log("⚠️ Ошибка чтения $fileName: ${e.message}")
+            defaultVer to createDefaultStructureForFile(fileName)
         }
     }
 
@@ -111,28 +121,40 @@ object ClassicCryptoAndSyncManager {
             innerJson.put("lastSaved", Instant.now().toString())
             val wrapper = JSONObject().put("version", version).put("data", encryptToBase64Data(innerJson.toString()))
             CryptoAndSyncManager.writeFileViaShizuku(path, wrapper.toString().toByteArray(Charsets.UTF_8), log)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            log("❌ Ошибка записи $fileName: ${e.message}")
             false
+        }
+    }
+
+    private fun createDefaultStructureForFile(fileName: String): JSONObject {
+        return JSONObject().apply {
+            put("lastSaved", Instant.now().toString())
+            if (fileName == "wallet.json") {
+                put("currencies", JSONObject())
+                put("lootboxQueue", JSONObject().put("unopenedLootboxes", JSONArray()))
+                put("currencyAllowedInRun", JSONObject().put("4", true).put("5", true))
+                put("ownedOnlyBuyOnceProducts", JSONArray())
+            }
         }
     }
 
     fun loadFullClassicState(log: (String) -> Unit): ClassicMemoryState {
         CryptoAndSyncManager.stopGameForSync(PKG_CLASSIC, false, log)
-        return ClassicMemoryState(
-            walletVer = readClassicJson("wallet.json", log).first, wallet = readClassicJson("wallet.json", log).second,
-            upgradesVer = readClassicJson("upgrades.json", log).first, upgrades = readClassicJson("upgrades.json", log).second,
-            charsVer = readClassicJson("characters_inventory.json", log).first, chars = readClassicJson("characters_inventory.json", log).second,
-            boardsVer = readClassicJson("boards_inventory.json", log).first, boards = readClassicJson("boards_inventory.json", log).second,
-            statsVer = readClassicJson("user_stats.json", log).first, stats = readClassicJson("user_stats.json", log).second,
-            seasonHuntVer = readClassicJson("season_hunt.json", log).first, seasonHunt = readClassicJson("season_hunt.json", log).second,
-            challengesVer = readClassicJson("generic_challenges.json", log).first, challenges = readClassicJson("generic_challenges.json", log).second,
-            questsVer = readClassicJson("quests.json", log).first, quests = readClassicJson("quests.json", log).second,
-            cityTourVer = readClassicJson("city_tour.json", log).first, cityTour = readClassicJson("city_tour.json", log).second,
-            achievementsVer = readClassicJson("achievements.json", log).first, achievements = readClassicJson("achievements.json", log).second,
-            trophiesVer = readClassicJson("trophies.json", log).first, trophies = readClassicJson("trophies.json", log).second,
-            portraitsVer = readClassicJson("profile_portrait.json", log).first, portraits = readClassicJson("profile_portrait.json", log).second,
-            framesVer = readClassicJson("profile_frame.json", log).first, frames = readClassicJson("profile_frame.json", log).second
-        )
+        val (wVer, w) = readClassicJson("wallet.json", log)
+        val (uVer, u) = readClassicJson("upgrades.json", log)
+        val (cVer, c) = readClassicJson("characters_inventory.json", log)
+        val (bVer, b) = readClassicJson("boards_inventory.json", log)
+        val (sVer, s) = readClassicJson("user_stats.json", log)
+        val (shVer, sh) = readClassicJson("season_hunt.json", log)
+        val (chVer, ch) = readClassicJson("generic_challenges.json", log)
+        val (qVer, q) = readClassicJson("quests.json", log)
+        val (ctVer, ct) = readClassicJson("city_tour.json", log)
+        val (aVer, a) = readClassicJson("achievements.json", log)
+        val (tVer, t) = readClassicJson("trophies.json", log)
+        val (pVer, p) = readClassicJson("profile_portrait.json", log)
+        val (fVer, f) = readClassicJson("profile_frame.json", log)
+        return ClassicMemoryState(wVer, w, uVer, u, cVer, c, bVer, b, sVer, s, shVer, sh, chVer, ch, qVer, q, ctVer, ct, aVer, a, tVer, t, pVer, p, fVer, f)
     }
 
     fun saveFullClassicState(state: ClassicMemoryState, log: (String) -> Unit): Boolean {
@@ -143,63 +165,27 @@ object ClassicCryptoAndSyncManager {
         ok = ok and writeClassicJson("characters_inventory.json", state.charsVer, state.chars, log)
         ok = ok and writeClassicJson("boards_inventory.json", state.boardsVer, state.boards, log)
         ok = ok and writeClassicJson("user_stats.json", state.statsVer, state.stats, log)
-        if (state.seasonHunt.length() > 0) writeClassicJson("season_hunt.json", state.seasonHuntVer, state.seasonHunt, log)
-        if (state.challenges.length() > 0) writeClassicJson("generic_challenges.json", state.challengesVer, state.challenges, log)
-        if (state.achievements.length() > 0) writeClassicJson("achievements.json", state.achievementsVer, state.achievements, log)
-        if (state.trophies.length() > 0) writeClassicJson("trophies.json", state.trophiesVer, state.trophies, log)
-        if (state.portraits.length() > 0) writeClassicJson("profile_portrait.json", state.portraitsVer, state.portraits, log)
-        if (state.frames.length() > 0) writeClassicJson("profile_frame.json", state.framesVer, state.frames, log)
+        if (state.seasonHunt.length() > 1) writeClassicJson("season_hunt.json", state.seasonHuntVer, state.seasonHunt, log)
+        if (state.challenges.length() > 1) writeClassicJson("generic_challenges.json", state.challengesVer, state.challenges, log)
+        if (state.quests.length() > 1) writeClassicJson("quests.json", state.questsVer, state.quests, log)
+        if (state.cityTour.length() > 1) writeClassicJson("city_tour.json", state.cityTourVer, state.cityTour, log)
+        if (state.achievements.length() > 1) writeClassicJson("achievements.json", state.achievementsVer, state.achievements, log)
+        if (state.trophies.length() > 1) writeClassicJson("trophies.json", state.trophiesVer, state.trophies, log)
+        if (state.portraits.length() > 1) writeClassicJson("profile_portrait.json", state.portraitsVer, state.portraits, log)
+        if (state.frames.length() > 1) writeClassicJson("profile_frame.json", state.framesVer, state.frames, log)
         return ok
     }
 
     fun setCurrencyInMemory(wallet: JSONObject, id: String, amount: Long) {
         val currencies = wallet.optJSONObject("currencies") ?: JSONObject()
         val obj = currencies.optJSONObject(id) ?: JSONObject().apply {
-            put("expirationType", if (id == "6") 1 else 0)
-            if (id == "6") put("expirationValue", 1793577599999L)
+            put("expirationType", 0)
             put("contextType", 0)
             put("contextData", JSONObject())
         }
         obj.put("value", amount)
         currencies.put(id, obj)
         wallet.put("currencies", currencies)
-    }
-
-    fun addSkipAdTicketsBundle(state: ClassicMemoryState, addAmount: Long) {
-        val currencies = state.wallet.optJSONObject("currencies") ?: JSONObject()
-        val cur = currencies.optJSONObject("11")?.optLong("value", 0L) ?: 0L
-        val newTotal = cur + addAmount
-
-        val cObj = currencies.optJSONObject("11") ?: JSONObject()
-        cObj.put("value", newTotal)
-        cObj.put("expirationType", 0); cObj.put("contextType", 0); cObj.put("contextData", JSONObject())
-        currencies.put("11", cObj)
-        state.wallet.put("currencies", currencies)
-    }
-
-    fun addShowdownRaceTicketsBundle(state: ClassicMemoryState, addAmount: Long) {
-        val currencies = state.wallet.optJSONObject("currencies") ?: JSONObject()
-        for (slot in listOf("6", "12")) {
-            val cur = currencies.optJSONObject(slot)?.optLong("value", 0L) ?: 0L
-            val cObj = currencies.optJSONObject(slot) ?: JSONObject()
-            cObj.put("value", cur + addAmount)
-            cObj.put("expirationType", if (slot == "6") 1 else 0)
-            if (slot == "6") cObj.put("expirationValue", 1793577599999L)
-            cObj.put("contextType", 0); cObj.put("contextData", JSONObject())
-            currencies.put(slot, cObj)
-        }
-        state.wallet.put("currencies", currencies)
-        state.stats.put("freeSpinsUsed", JSONObject())
-    }
-
-    fun addOwnedProductsToWallet(wallet: JSONObject, productIds: List<String>) {
-        val ownedArr = wallet.optJSONArray("ownedOnlyBuyOnceProducts") ?: JSONArray()
-        val existing = mutableSetOf<String>()
-        for (i in 0 until ownedArr.length()) existing.add(ownedArr.getString(i))
-        for (prodId in productIds) {
-            if (existing.add(prodId)) ownedArr.put(prodId)
-        }
-        wallet.put("ownedOnlyBuyOnceProducts", ownedArr)
     }
 
     fun setDoubleCoinsOnly(state: ClassicMemoryState, enabled: Boolean) {
@@ -209,7 +195,11 @@ object ClassicCryptoAndSyncManager {
                 put("value", JSONObject().put("id", "doubleCoins").put("type", 0).put("subType", 0).put("value", 2))
                 put("expirationType", 0); put("contextType", 0); put("contextData", JSONObject())
             })
-            addOwnedProductsToWallet(state.wallet, listOf("coin_doubler"))
+            val ownedArr = state.wallet.optJSONArray("ownedOnlyBuyOnceProducts") ?: JSONArray()
+            var hasDoubler = false
+            for (i in 0 until ownedArr.length()) if (ownedArr.getString(i) == "coin_doubler") hasDoubler = true
+            if (!hasDoubler) ownedArr.put("coin_doubler")
+            state.wallet.put("ownedOnlyBuyOnceProducts", ownedArr)
         } else {
             pickupMods.remove("doubleCoins")
         }
@@ -232,6 +222,7 @@ object ClassicCryptoAndSyncManager {
         })
     }
 
+    // Точные ключи медалей Top Run: 106=Бронза, 105=Серебро, 104=Золото, 103=Алмаз, 102=Чемпион
     fun getTopRunMedals(state: ClassicMemoryState): Map<String, Int> {
         val statsCol = state.stats.optJSONObject("userStatCollection") ?: JSONObject()
         return mapOf(
@@ -245,27 +236,50 @@ object ClassicCryptoAndSyncManager {
 
     fun setTopRunMedals(state: ClassicMemoryState, medals: Map<String, Int>) {
         val statsCol = state.stats.optJSONObject("userStatCollection") ?: JSONObject()
-        for ((k, v) in medals) statsCol.put(k, v.coerceIn(0, 999999))
+        for ((k, v) in medals) {
+            statsCol.put(k, v.coerceIn(0, 999999))
+        }
         state.stats.put("userStatCollection", statsCol)
     }
 
     fun fixEventsTabFreezeInMemory(state: ClassicMemoryState) {
         val statsCol = state.stats.optJSONObject("userStatCollection") ?: JSONObject()
-        if (statsCol.optInt("102", 0) > 99999) statsCol.put("102", 10)
+        if (statsCol.optInt("102", 0) > 99999) {
+            statsCol.put("102", 10)
+        }
         state.stats.put("userStatCollection", statsCol)
         state.seasonHunt.remove("rewardsThisSeason")
         state.seasonHunt.put("lastUnlockedTierSeen", 0)
+
+        val challengeStates = state.challenges.optJSONObject("challengeStates")
+        if (challengeStates != null) {
+            val chKeys = challengeStates.keys()
+            while (chKeys.hasNext()) {
+                val key = chKeys.next()
+                val ch = challengeStates.getJSONObject(key)
+                ch.remove("rewardUnlockOffset")
+                val rStates = ch.optJSONArray("rewardStates") ?: JSONArray()
+                for (i in 0 until rStates.length()) {
+                    val rs = rStates.getJSONObject(i)
+                    if (rs.optInt("State", 0) == 2) rs.put("State", 0)
+                }
+            }
+        }
     }
 
+    // Чтение активных событий/ивентов из generic_challenges.json
     fun getActiveChallenges(state: ClassicMemoryState): List<ActiveChallengeInfo> {
         val list = mutableListOf<ActiveChallengeInfo>()
         val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return list
         val keys = challengeStates.keys()
+
         while (keys.hasNext()) {
             val key = keys.next()
             val ch = challengeStates.optJSONObject(key) ?: continue
+
             val curScore = ch.optLong("currentScore", 0L)
             val city = ch.optString("targetCity", "default")
+
             var maxReq = 0L
             val rStates = ch.optJSONArray("rewardStates")
             if (rStates != null) {
@@ -274,79 +288,99 @@ object ClassicCryptoAndSyncManager {
                     if (req > maxReq) maxReq = req
                 }
             }
+
             val friendlyTitle = when {
-                key.contains("marathon", true) -> "🏃 Марафон (Marathon)"
-                key.contains("pvp", true) || key.contains("showdown", true) -> "🏁 PvP-Забег (Showdown)"
-                key.contains("lava", true) -> "🌋 Пол — это лава"
-                else -> "🏆 Режим: $key"
+                key.contains("marathon", ignoreCase = true) -> "🏃 Марафон (Marathon)"
+                key.contains("pvp", ignoreCase = true) || key.contains("showdown", ignoreCase = true) -> "🏁 PvP-Забег (Subway Showdown)"
+                key.contains("lava", ignoreCase = true) -> "🌋 Пол — это лава (Floor Is Lava)"
+                key.contains("tag", ignoreCase = true) || key.contains("time", ignoreCase = true) -> "⏱️ Забег на время (Tag Time Attack)"
+                key.contains("mystery", ignoreCase = true) -> "🎁 Таинственные препятствия"
+                else -> "🏆 Событие: $key"
             }
+
             list.add(ActiveChallengeInfo(key, friendlyTitle, curScore, maxReq, city))
         }
         return list
     }
 
-    fun setChallengeScoreCustom(state: ClassicMemoryState, challengeId: String, targetScore: Long, unlockStagesReward: Boolean) {
+    fun setChallengeScoreCustom(
+        state: ClassicMemoryState,
+        challengeId: String,
+        targetScore: Long,
+        unlockStagesReward: Boolean
+    ) {
         val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return
         val ch = challengeStates.optJSONObject(challengeId) ?: return
+
         ch.put("currentScore", targetScore)
         ch.put("highScore", maxOf(ch.optLong("highScore", 0L), targetScore))
         ch.put("lastSeenScore", targetScore)
         ch.put("lastSubmittedScore", targetScore)
         ch.optJSONObject("requirements")?.put("cooldownItems", JSONObject())
+
         if (unlockStagesReward) {
             val rStates = ch.optJSONArray("rewardStates")
             if (rStates != null) {
-                for (i in 0 until rStates.length()) rStates.getJSONObject(i).put("AdRequired", false)
+                for (i in 0 until rStates.length()) {
+                    rStates.getJSONObject(i).put("AdRequired", false)
+                }
             }
         }
     }
 
-    fun unlockAllAchievementsCompletely(state: ClassicMemoryState) {
-        val ach = state.achievements
-        ach.put("patchVersion", 1)
-        val entries = ach.optJSONObject("achievementEntries") ?: JSONObject()
+    // ==================== ДОСТИЖЕНИЯ (Brawl Stars, друзья-медиа, рекорды) ====================
 
-        val keys = entries.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            val entry = entries.getJSONObject(k)
-            val goals = entry.optJSONArray("goals")
-            val maxTier = if (goals != null && goals.length() > 0) goals.length() - 1 else 3
-            val maxProgress = if (goals != null && goals.length() > 0) goals.optInt(goals.length() - 1, 1000) else 1000
-            entry.put("currentTier", maxTier)
-            entry.put("progress", maxProgress)
-            entry.put("highestProgress", maxProgress)
-            val claimArr = JSONArray()
-            for (i in 0..maxTier) claimArr.put(true)
-            entry.put("claimState", claimArr)
-            entry.put("markAsViewed", true)
+    fun unlockAllAchievementsInMemory(state: ClassicMemoryState) {
+        val achObj = state.achievements.optJSONObject("achievements") ?: JSONObject()
+        for (info in ClassicDatabase.ACHIEVEMENTS_LIST) {
+            achObj.put(info.id, JSONObject().apply {
+                put("tier", info.maxTier)
+                put("progress", 999999)
+                put("isClaimed", false)
+            })
         }
-
-        fun inject(id: String, targetVal: Int) {
-            val obj = entries.optJSONObject(id) ?: JSONObject().apply {
-                put("id", id)
-                put("goals", JSONArray().put(1).put(5).put(targetVal))
-            }
-            obj.put("currentTier", 2)
-            obj.put("progress", targetVal)
-            obj.put("highestProgress", targetVal)
-            obj.put("claimState", JSONArray().put(true).put(true).put(true))
-            obj.put("markAsViewed", true)
-            entries.put(id, obj)
-        }
-
-        inject("achievement_social_friends", 50)
-        inject("achievement_brawl_stars_crew", 10)
-        inject("achievement_facebook_connect", 1)
-        inject("achievement_top_run_diamond", 100)
-
-        ach.put("achievementEntries", entries)
-
-        val trArr = JSONArray()
-        ClassicDatabase.ALL_TROPHIES.forEach { trArr.put(it) }
-        state.trophies.put("trophiesEarned", trArr)
-        state.trophies.put("trophyCompletions", JSONObject().put("TrophySet1", 4).put("TrophySet2", 4))
+        state.achievements.put("achievements", achObj)
     }
+
+    // ==================== РАМКИ И ПОРТРЕТЫ ПО ВЫБОРУ ====================
+
+    fun isPortraitUnlocked(state: ClassicMemoryState, portraitId: String): Boolean =
+        state.portraits.optJSONObject("owned")?.has(portraitId) == true
+
+    fun togglePortraitUnlock(state: ClassicMemoryState, portraitId: String, unlock: Boolean) {
+        state.portraits.put("patchVersion", 1)
+        val owned = state.portraits.optJSONObject("owned") ?: JSONObject()
+        if (unlock) {
+            owned.put(portraitId, JSONObject().put("id", portraitId).put("isSeen", true))
+        } else {
+            owned.remove(portraitId)
+        }
+        state.portraits.put("owned", owned)
+    }
+
+    fun selectPortrait(state: ClassicMemoryState, portraitId: String) {
+        state.portraits.put("selected", portraitId)
+    }
+
+    fun isFrameUnlocked(state: ClassicMemoryState, frameId: String): Boolean =
+        state.frames.optJSONObject("owned")?.has(frameId) == true
+
+    fun toggleFrameUnlock(state: ClassicMemoryState, frameId: String, unlock: Boolean) {
+        state.frames.put("patchVersion", 1)
+        val owned = state.frames.optJSONObject("owned") ?: JSONObject()
+        if (unlock) {
+            owned.put(frameId, JSONObject().put("id", frameId).put("isSeen", true))
+        } else {
+            owned.remove(frameId)
+        }
+        state.frames.put("owned", owned)
+    }
+
+    fun selectFrame(state: ClassicMemoryState, frameId: String) {
+        state.frames.put("selected", frameId)
+    }
+
+    // ==================== СЁРФЕРЫ И ДОСКИ ====================
 
     fun isSurferUnlocked(state: ClassicMemoryState, surferId: String): Boolean =
         state.chars.optJSONObject("owned")?.has(surferId) == true
@@ -443,104 +477,11 @@ object ClassicCryptoAndSyncManager {
         state.boards.put("owned", owned)
     }
 
-    fun unlockAllPortraitsFramesAndTrophiesInMemory(state: ClassicMemoryState) {
-        state.portraits.put("patchVersion", 1)
-        val ownedPortraits = state.portraits.optJSONObject("owned") ?: JSONObject()
-        for (pId in ClassicDatabase.ALL_PORTRAITS) ownedPortraits.put(pId, JSONObject().put("id", pId).put("isSeen", true))
-        state.portraits.put("owned", ownedPortraits)
-
-        state.frames.put("patchVersion", 1)
-        val ownedFrames = state.frames.optJSONObject("owned") ?: JSONObject()
-        for (fId in ClassicDatabase.ALL_FRAMES) ownedFrames.put(fId, JSONObject().put("id", fId).put("isSeen", true))
-        state.frames.put("owned", ownedFrames)
-
-        val trArr = JSONArray()
-        ClassicDatabase.ALL_TROPHIES.forEach { trArr.put(it) }
-        state.trophies.put("trophiesEarned", trArr)
-        state.trophies.put("trophyCompletions", JSONObject().put("TrophySet1", 4).put("TrophySet2", 4))
-    }
-
     fun addLootboxesToQueueInMemory(state: ClassicMemoryState, boxId: String, count: Int) {
         val queueObj = state.wallet.optJSONObject("lootboxQueue") ?: JSONObject()
         val unopened = queueObj.optJSONArray("unopenedLootboxes") ?: JSONArray()
         repeat(count) { unopened.put(JSONObject().put("id", boxId).put("source", "editor_gift")) }
         queueObj.put("unopenedLootboxes", unopened)
         state.wallet.put("lootboxQueue", queueObj)
-    }
-
-    // Методы подсчета 557 и 573 для интерфейса Classic
-    fun getSurfersAndOutfitsCount(state: ClassicMemoryState): Pair<Int, Int> {
-        val owned = state.chars.optJSONObject("owned") ?: JSONObject()
-        var unlockedTotal = 0
-        val keys = owned.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            val obj = owned.optJSONObject(k)
-            val outfits = obj?.optJSONArray("ownedOutfits")
-            unlockedTotal += if (outfits != null && outfits.length() > 0) outfits.length() else 1
-        }
-        return unlockedTotal to maxOf(557, unlockedTotal)
-    }
-
-    fun getBoardsAndUpgradesCount(state: ClassicMemoryState): Pair<Int, Int> {
-        val owned = state.boards.optJSONObject("owned") ?: JSONObject()
-        var unlockedTotal = 0
-        val keys = owned.keys()
-        while (keys.hasNext()) {
-            val k = keys.next()
-            val obj = owned.optJSONObject(k)
-            val upgs = obj?.optJSONObject("ownedUpgrades")
-            val upgCount = upgs?.keys()?.asSequence()?.count { upgs.optBoolean(it, false) } ?: 0
-            unlockedTotal += (1 + upgCount)
-        }
-        return unlockedTotal to maxOf(573, unlockedTotal)
-    }
-
-    fun getMergedSurfersList(state: ClassicMemoryState): List<Pair<String, Pair<String, List<String>>>> {
-        val result = mutableListOf<Pair<String, Pair<String, List<String>>>>()
-        val seenIds = mutableSetOf<String>()
-        val owned = state.chars.optJSONObject("owned") ?: JSONObject()
-
-        for ((id, pair) in ClassicDatabase.CLASSIC_SURFERS) {
-            seenIds.add(id)
-            val existingOutfits = getOwnedOutfitsForSurfer(state, id)
-            val mergedOutfits = (pair.second + existingOutfits).distinct()
-            result.add(id to (pair.first to mergedOutfits))
-        }
-
-        val keys = owned.keys()
-        while (keys.hasNext()) {
-            val id = keys.next()
-            if (seenIds.add(id)) {
-                val outfits = getOwnedOutfitsForSurfer(state, id).toList().ifEmpty { listOf("default") }
-                val prettyName = id.replaceFirstChar { it.uppercase() }
-                result.add(id to ("$prettyName ($id)" to outfits))
-            }
-        }
-        return result
-    }
-
-    fun getMergedBoardsList(state: ClassicMemoryState): List<Pair<String, Pair<String, List<String>>>> {
-        val result = mutableListOf<Pair<String, Pair<String, List<String>>>>()
-        val seenIds = mutableSetOf<String>()
-        val owned = state.boards.optJSONObject("owned") ?: JSONObject()
-
-        for ((id, pair) in ClassicDatabase.CLASSIC_BOARDS) {
-            seenIds.add(id)
-            val existingUpgs = getOwnedUpgradesForBoard(state, id)
-            val mergedUpgs = (pair.second + existingUpgs).distinct()
-            result.add(id to (pair.first to mergedUpgs))
-        }
-
-        val keys = owned.keys()
-        while (keys.hasNext()) {
-            val id = keys.next()
-            if (seenIds.add(id)) {
-                val upgs = getOwnedUpgradesForBoard(state, id).toList()
-                val prettyName = id.replaceFirstChar { it.uppercase() }
-                result.add(id to ("$prettyName ($id)" to upgs))
-            }
-        }
-        return result
     }
 }
