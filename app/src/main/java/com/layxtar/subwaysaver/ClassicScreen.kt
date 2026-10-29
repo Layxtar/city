@@ -45,20 +45,17 @@ fun ClassicScreen(
     }
     var doubleCoinsOnly by remember { mutableStateOf(false) }
 
-    // Точные ключи медалей Top Run: 106, 105, 104, 103, 102
     var medalBronze by remember { mutableStateOf("0") }
     var medalSilver by remember { mutableStateOf("0") }
     var medalGold by remember { mutableStateOf("0") }
     var medalDiamond by remember { mutableStateOf("0") }
     var medalChampion by remember { mutableStateOf("0") }
 
-    // Активные события (ивенты)
     var activeChallengesList by remember { mutableStateOf<List<ActiveChallengeInfo>>(emptyList()) }
     var selectedChallengeId by remember { mutableStateOf("") }
     var customScoreInput by remember { mutableStateOf("1000000") }
     var unlockStagesCheckbox by remember { mutableStateOf(true) }
 
-    // Поиск и фильтры сёрферов/досок
     var searchQuery by remember { mutableStateOf("") }
     var surferCollectionFilter by remember { mutableStateOf("Все") }
     var expandedSurferId by remember { mutableStateOf<String?>(null) }
@@ -127,7 +124,7 @@ fun ClassicScreen(
         }
         scope.launch {
             isBusy = true
-            log("⏳ Чтение файлов Classic Subway Surfers...")
+            log("⏳ Чтение профиля Classic Subway Surfers...")
             val loaded = withContext(Dispatchers.IO) {
                 ClassicCryptoAndSyncManager.loadFullClassicState {}
             }
@@ -166,9 +163,10 @@ fun ClassicScreen(
     val st = classicState
     val _trig = uiTrigger
 
-    // Счётчики открытых персонажей и досок
     val unlockedSurfersCount = if (st != null) ClassicDatabase.CLASSIC_SURFERS.count { ClassicCryptoAndSyncManager.isSurferUnlocked(st, it.first) } else 0
     val unlockedBoardsCount = if (st != null) ClassicDatabase.CLASSIC_BOARDS.count { ClassicCryptoAndSyncManager.isBoardUnlocked(st, it.first) } else 0
+    val unlockedPortraitsCount = if (st != null) ClassicDatabase.ALL_PORTRAITS.count { ClassicCryptoAndSyncManager.isPortraitUnlocked(st, it.first) } else 0
+    val unlockedFramesCount = if (st != null) ClassicDatabase.ALL_FRAMES.count { ClassicCryptoAndSyncManager.isFrameUnlocked(st, it.first) } else 0
 
     Scaffold(
         topBar = {
@@ -177,10 +175,10 @@ fun ClassicScreen(
                 ScrollableTabRow(selectedTabIndex = selectedTab) {
                     val tabs = listOf(
                         "💰 Кошелёк",
-                        "🏆 События & Медали",
+                        "🏆 Ивенты & Медали",
                         "🏄 Сёрферы ($unlockedSurfersCount/${ClassicDatabase.CLASSIC_SURFERS.size})",
                         "🛹 Доски ($unlockedBoardsCount/${ClassicDatabase.CLASSIC_BOARDS.size})",
-                        "🖼️ Рамки & Аватарки",
+                        "🖼️ Рамки & Аватарки ($unlockedFramesCount|$unlockedPortraitsCount)",
                         "⭐ Достижения"
                     )
                     tabs.forEachIndexed { idx, title ->
@@ -233,11 +231,11 @@ fun ClassicScreen(
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             if (st == null) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Загрузка сохранения Classic...")
+                    Text("Загрузка профиля Classic...")
                 }
             } else {
                 when (selectedTab) {
-                    // ВКЛАДКА 0: ЧИСТЫЙ КОШЕЛЁК (БЕЗ РЕКЛАМНЫХ И PVP БИЛЕТОВ)
+                    // ВКЛАДКА 0: КОШЕЛЁК
                     0 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -299,7 +297,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 1: ВЫБОР АКТИВНОГО ИВЕНТА, НАКРУТКА КУБКОВ И МЕДАЛИ TOP RUN
+                    // ВКЛАДКА 1: ИВЕНТЫ И МЕДАЛИ TOP RUN
                     1 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -310,7 +308,7 @@ fun ClassicScreen(
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("🏆 Накрутка Очков / Кубков в Активные Забеги", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Редактор сам определяет, какие события сейчас включены в игре. Выбери режим и укажи желаемое количество очков:", fontSize = 12.sp, color = Color.Gray)
+                                    Text("Редактор определяет активные события в generic_challenges.json:", fontSize = 12.sp, color = Color.Gray)
 
                                     if (activeChallengesList.isEmpty()) {
                                         Text("⚠️ Активных ивентов в generic_challenges.json не обнаружено.", color = Color.Yellow, fontSize = 12.sp)
@@ -428,7 +426,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 2: СЁРФЕРЫ (ФИЛЬТРЫ КОЛЛЕКЦИЙ + УМНЫЙ ПОИСК ПО ПОДСКИНАМ)
+                    // ВКЛАДКА 2: СЁРФЕРЫ
                     2 -> {
                         val filteredSurfers = remember(searchQuery, surferCollectionFilter, uiTrigger) {
                             ClassicDatabase.CLASSIC_SURFERS.filter { (id, pair) ->
@@ -457,7 +455,7 @@ fun ClassicScreen(
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
-                                label = { Text("🔍 Поиск по имени сёрфера или подскину (напр. zombie, robo, catrina)...") },
+                                label = { Text("🔍 Поиск сёрфера или подскина (напр. blob, onione, robo)...") },
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Spacer(modifier = Modifier.height(6.dp))
@@ -481,8 +479,8 @@ fun ClassicScreen(
                                 pushUndo()
                                 ClassicCryptoAndSyncManager.unlockAllClassicSurfersInMemory(st)
                                 uiTrigger++
-                                log("🏄 Все 275 сёрферов и костюмы открыты!")
-                            }) { Text("🏄 Открыть всех сёрферов и все костюмы") }
+                                log("🏄 Все ${ClassicDatabase.CLASSIC_SURFERS.size} сёрферов и все костюмы открыты!")
+                            }) { Text("🏄 Открыть всех сёрферов и костюмы") }
                             Spacer(modifier = Modifier.height(6.dp))
 
                             LazyColumn(
@@ -507,7 +505,7 @@ fun ClassicScreen(
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Text(name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                                     Text(
-                                                        text = if (isUnlocked) "✅ ОТКРЫТ (Костюмов: ${ownedOutfits.size}/${outfits.size})" else "🔒 ЗАКРЫТ",
+                                                        text = if (isUnlocked) "✅ ОТКРЫТ (${ownedOutfits.size}/${outfits.size} костюмов)" else "🔒 ЗАКРЫТ",
                                                         color = if (isUnlocked) Color(0xFF81C784) else Color(0xFFE57373),
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 12.sp
@@ -554,6 +552,7 @@ fun ClassicScreen(
                                                         ) {
                                                             Checkbox(
                                                                 checked = hasOutfit,
+                                                                enabled = outfitId != "default",
                                                                 onCheckedChange = { checked ->
                                                                     pushUndo()
                                                                     ClassicCryptoAndSyncManager.toggleSurferOutfit(st, id, outfitId, checked)
@@ -572,7 +571,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 3: ДОСКИ
+                    // ВКЛАДКА 3: ДОСКИ (ВКЛЮЧАЯ TORITO)
                     3 -> {
                         val filteredBoards = remember(searchQuery, uiTrigger) {
                             ClassicDatabase.CLASSIC_BOARDS.filter { (id, pair) ->
@@ -588,7 +587,7 @@ fun ClassicScreen(
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
-                                label = { Text("🔍 Поиск доски или способности...") },
+                                label = { Text("🔍 Поиск доски (напр. torito, blob, monster)...") },
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Spacer(modifier = Modifier.height(6.dp))
@@ -596,8 +595,8 @@ fun ClassicScreen(
                                 pushUndo()
                                 ClassicCryptoAndSyncManager.unlockAllClassicBoardsInMemory(st)
                                 uiTrigger++
-                                log("🛹 Все доски и способности открыты!")
-                            }) { Text("🛹 Открыть все доски и способности") }
+                                log("🛹 Все ${ClassicDatabase.CLASSIC_BOARDS.size} досок и их способности открыты!")
+                            }) { Text("🛹 Открыть все ${ClassicDatabase.CLASSIC_BOARDS.size} досок со способностями") }
                             Spacer(modifier = Modifier.height(6.dp))
 
                             LazyColumn(
@@ -621,7 +620,7 @@ fun ClassicScreen(
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Text(name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                                     Text(
-                                                        text = if (isUnlocked) "✅ ОТКРЫТА (Апгрейдов: ${ownedUpgrades.size}/${upgrades.size})" else "🔒 ЗАКРЫТА",
+                                                        text = if (isUnlocked) "✅ ОТКРЫТА (${ownedUpgrades.size}/${upgrades.size} способностей)" else "🔒 ЗАКРЫТА",
                                                         color = if (isUnlocked) Color(0xFF81C784) else Color(0xFFE57373),
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 12.sp
@@ -682,7 +681,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 4: РАМКИ И АВАТАРКИ ПО ВЫБОРУ (С КНОПКАМИ ЭКИПИРОВКИ)
+                    // ВКЛАДКА 4: РАМКИ И АВАТАРКИ (ВКЛЮЧАЯ ВСЕХ BOB THE BLOB)
                     4 -> {
                         val currentFrame = st.frames.optString("selected", "default_frame")
                         val currentPortrait = st.portraits.optString("selected", "portrait_jake_default")
@@ -693,9 +692,25 @@ fun ClassicScreen(
                         ) {
                             Spacer(modifier = Modifier.height(6.dp))
 
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(modifier = Modifier.weight(1f), onClick = {
+                                    pushUndo()
+                                    ClassicCryptoAndSyncManager.unlockAllFramesInMemory(st)
+                                    uiTrigger++
+                                    log("🖼️ Все ${ClassicDatabase.ALL_FRAMES.size} рамок открыты!")
+                                }) { Text("🖼️ Все рамки") }
+
+                                Button(modifier = Modifier.weight(1f), onClick = {
+                                    pushUndo()
+                                    ClassicCryptoAndSyncManager.unlockAllPortraitsInMemory(st)
+                                    uiTrigger++
+                                    log("👤 Все ${ClassicDatabase.ALL_PORTRAITS.size} аватарок открыты!")
+                                }) { Text("👤 Все аватарки") }
+                            }
+
                             Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("🖼️ Рамки Профиля (Выбор & Разблокировка)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("🖼️ Рамки Профиля ($unlockedFramesCount/${ClassicDatabase.ALL_FRAMES.size})", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                     ClassicDatabase.ALL_FRAMES.forEach { (frameId, frameTitle) ->
                                         val isUnlocked = ClassicCryptoAndSyncManager.isFrameUnlocked(st, frameId)
                                         val isEquipped = currentFrame == frameId
@@ -720,7 +735,6 @@ fun ClassicScreen(
                                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                                 onClick = {
                                                     pushUndo()
-                                                    ClassicCryptoAndSyncManager.toggleFrameUnlock(st, frameId, true)
                                                     ClassicCryptoAndSyncManager.selectFrame(st, frameId)
                                                     uiTrigger++
                                                     log("🖼️ Выбрана рамка: $frameTitle")
@@ -734,8 +748,8 @@ fun ClassicScreen(
                             }
 
                             Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("👤 Портреты / Аватарки (Выбор & Разблокировка)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("👤 Портреты и Аватарки ($unlockedPortraitsCount/${ClassicDatabase.ALL_PORTRAITS.size})", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                     ClassicDatabase.ALL_PORTRAITS.forEach { (portraitId, portraitTitle) ->
                                         val isUnlocked = ClassicCryptoAndSyncManager.isPortraitUnlocked(st, portraitId)
                                         val isEquipped = currentPortrait == portraitId
@@ -760,7 +774,6 @@ fun ClassicScreen(
                                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                                 onClick = {
                                                     pushUndo()
-                                                    ClassicCryptoAndSyncManager.togglePortraitUnlock(st, portraitId, true)
                                                     ClassicCryptoAndSyncManager.selectPortrait(st, portraitId)
                                                     uiTrigger++
                                                     log("👤 Выбран портрет: $portraitTitle")
@@ -776,7 +789,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 5: ДОСТИЖЕНИЯ (BRAWL STARS, ДРУЗЬЯ И ТРОФЕИ)
+                    // ВКЛАДКА 5: ДОСТИЖЕНИЯ И КОРОБКИ
                     5 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -787,7 +800,7 @@ fun ClassicScreen(
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("⭐ Эксклюзивные Достижения", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Выполняет все скрытые и медийные ачивки (друг звезды, сбор состава Brawl Stars, Core Crew и т.д.):", fontSize = 12.sp, color = Color.Gray)
+                                    Text("Выполняет все скрытые ачивки: друг медийной личности, полный сбор Brawl Stars, Rivals и др.", fontSize = 12.sp, color = Color.Gray)
 
                                     Button(
                                         modifier = Modifier.fillMaxWidth(),
@@ -795,7 +808,8 @@ fun ClassicScreen(
                                         onClick = {
                                             pushUndo()
                                             ClassicCryptoAndSyncManager.unlockAllAchievementsInMemory(st)
-                                            log("⭐ Все достижения (включая медийного друга и Brawl Stars) выполнены на максимум!")
+                                            uiTrigger++
+                                            log("⭐ Все достижения выполнены на максимум!")
                                         }
                                     ) { Text("⭐ ВЫПОЛНИТЬ ВСЕ ДОСТИЖЕНИЯ (МАКСИМУМ)", color = Color.White, fontWeight = FontWeight.Bold) }
 
