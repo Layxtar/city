@@ -47,6 +47,7 @@ fun Pvz2Screen(
     var targetMastery by remember { mutableStateOf("200") }
     var pinataMultiplier by remember { mutableStateOf("100") }
     var pinataMinSeeds by remember { mutableStateOf("1000") }
+    var useNegativeSunBonus by remember { mutableStateOf(true) }
 
     fun loadPvz2Async() {
         if (!CryptoAndSyncManager.hasPermission()) {
@@ -87,7 +88,7 @@ fun Pvz2Screen(
                 ScrollableTabRow(selectedTabIndex = selectedTab) {
                     val tabs = listOf(
                         "🛒 Мега-Магазин (1🪙)",
-                        "🌞 0 Солнца & Моды",
+                        "🌞 -500 Солнца & Моды",
                         "💰 Профиль pp.dat",
                         "📂 Папка CDN & Откат"
                     )
@@ -131,13 +132,14 @@ fun Pvz2Screen(
                         Spacer(modifier = Modifier.height(6.dp))
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🛒 Полный Магазин: Стандартные наборы + 214 Растений + 342 Скина + Семена за 1 Монету", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("🛒 Полный Магазин за 1 Монету + Семена + Списание Валют + Бонусы", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Text(
-                                    "Обновляет магазин в папке `${activeCdnDir.substringAfterLast("/")}`:\n" +
-                                    "• Сохраняет все стандартные бандлы, пиньяты и офферы игры, делая их по 1 монете.\n" +
+                                    "Собирает магазин в `${activeCdnDir.substringAfterLast("/")}`:\n" +
+                                    "• Все существующие товары игры переведены в 1 монету.\n" +
                                     "• Вкладка Plants: все 214 растений (включая Scorchoak / pyroak, Thornwhip, Volt Snapdragon) за 1 монету.\n" +
-                                    "• Вкладка Costumes: все 342 скина за 1 монету.\n" +
-                                    "• Вкладки Seeds 1 / Seeds 2 / Seeds 3: пакеты по 1, 100, 10 000, 100 000 и 1 000 000 семян с иконкой самого растения (без ошибок MISSING)!",
+                                    "• Вкладки Seeds / Seeds2 / Seeds3: пакеты семян по 1, 100, 10 000, 100 000 и 1 000 000 шт. с авто-клонированием таблиц лута для всех новых растений!\n" +
+                                    "• Вкладка DeleteItems: отрицательные паки (-1K .. -1B) для очистки переполненных валют.\n" +
+                                    "• Вкладка Piñatas & Bundles: супер-пиньяты All Plants XP (прокачивают все 214 растений разом!) и умножители Календаря/Квестов x200.",
                                     fontSize = 12.sp,
                                     color = Color.Gray
                                 )
@@ -155,11 +157,11 @@ fun Pvz2Screen(
                                         }
                                     }
                                 ) {
-                                    Text("🛒 ПРОПАТЧИТЬ МАГАЗИН (ВСЕ РАСТЕНИЯ, СЕМЕНА И НАБОРЫ ЗА 1🪙)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Text("🛒 УСТАНОВИТЬ ПОЛНЫЙ МАГАЗИН (РАСТЕНИЯ + СЕМЕНА + DELETE ITEMS)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                 }
 
                                 Divider(modifier = Modifier.padding(vertical = 4.dp))
-                                Text("🔥 Новейшие растения на витрине и во вкладке Seeds 2:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF81C784))
+                                Text("🔥 Новейшие растения с полным лутом семян во вкладке Seeds2:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF81C784))
                                 Pvz2Database.NEWEST_PLANTS_HIGHLIGHT.forEach { (id, title) ->
                                     Text("• $title (ID: $id)", fontSize = 12.sp)
                                 }
@@ -177,8 +179,23 @@ fun Pvz2Screen(
                         Spacer(modifier = Modifier.height(6.dp))
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("🌞 Мод: 0 Солнца + Мгновенная Перезарядка (FloatStats Fix)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                Text("Обнуляет массивы `Cost`, `PacketCooldown` и `StartingCooldown` внутри `FloatStats` в файле `PlantLevels.rton` и `PlantProperties.rton` для всех уровней прокачки.", fontSize = 12.sp, color = Color.Gray)
+                                Text("🌞 Моментальная Перезарядка (-999) + Отрицательная Цена Солнца", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text(
+                                    "Прописывает кулдаун `-999` (мгновенный откат слота!) во все файлы `PlantLevels.rton` и `PlantProperties.rton` во всех папках CDN.",
+                                    fontSize = 12.sp,
+                                    color = Color.Gray
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(
+                                        checked = useNegativeSunBonus,
+                                        onCheckedChange = { useNegativeSunBonus = it }
+                                    )
+                                    Text(
+                                        text = if (useNegativeSunBonus) "Отрицательная цена (-500☀️: посадка ДАЁТ +500 солнца!)" else "Обычная цена 0☀️",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
                                 Button(
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
@@ -186,12 +203,19 @@ fun Pvz2Screen(
                                         scope.launch {
                                             isBusy = true
                                             withContext(Dispatchers.IO) {
-                                                Pvz2Manager.patchZeroSunAndInstantCooldown(activeCdnDir, log)
+                                                Pvz2Manager.patchZeroSunAndInstantCooldown(activeCdnDir, useNegativeSunBonus, log)
                                             }
                                             isBusy = false
                                         }
                                     }
-                                ) { Text("🌞 ВКЛЮЧИТЬ 0 СОЛНЦА + 0 СЕК ПЕРЕЗАРЯДКИ", color = Color.White, fontWeight = FontWeight.Bold) }
+                                ) {
+                                    Text(
+                                        text = if (useNegativeSunBonus) "🌞 ВКЛЮЧИТЬ -500 СОЛНЦА + МГНОВЕННЫЙ ОТКАТ (-999)" else "🌞 ВКЛЮЧИТЬ 0 СОЛНЦА + МГНОВЕННЫЙ ОТКАТ (-999)",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp
+                                    )
+                                }
                             }
                         }
 
