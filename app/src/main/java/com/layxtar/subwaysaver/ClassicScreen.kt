@@ -58,11 +58,13 @@ fun ClassicScreen(
 
     var searchQuery by remember { mutableStateOf("") }
     var surferCollectionFilter by remember { mutableStateOf("Все") }
+    var boardFilterMode by remember { mutableStateOf("Все") }
     var expandedSurferId by remember { mutableStateOf<String?>(null) }
     var expandedBoardId by remember { mutableStateOf<String?>(null) }
 
-    var selectedLootbox by remember { mutableStateOf(ClassicDatabase.LOOTBOX_TYPES.first().first) }
-    var lootboxCount by remember { mutableStateOf("10") }
+    // Поиск и фильтр для вкладки Рамок и Аватарок
+    var profileItemsSearch by remember { mutableStateOf("") }
+    var profileItemsFilter by remember { mutableStateOf("Все") }
 
     fun applyUIToState(st: ClassicMemoryState) {
         for ((id, valStr) in classicCurrencies) {
@@ -163,10 +165,47 @@ fun ClassicScreen(
     val st = classicState
     val _trig = uiTrigger
 
-    val unlockedSurfersCount = if (st != null) ClassicDatabase.CLASSIC_SURFERS.count { ClassicCryptoAndSyncManager.isSurferUnlocked(st, it.first) } else 0
-    val unlockedBoardsCount = if (st != null) ClassicDatabase.CLASSIC_BOARDS.count { ClassicCryptoAndSyncManager.isBoardUnlocked(st, it.first) } else 0
-    val unlockedPortraitsCount = if (st != null) ClassicDatabase.ALL_PORTRAITS.count { ClassicCryptoAndSyncManager.isPortraitUnlocked(st, it.first) } else 0
-    val unlockedFramesCount = if (st != null) ClassicDatabase.ALL_FRAMES.count { ClassicCryptoAndSyncManager.isFrameUnlocked(st, it.first) } else 0
+    // ==================== ТОЧНЫЕ ЖИВЫЕ СЧЁТЧИКИ ВСЕХ КОЛЛЕКЦИЙ ====================
+    val totalSurfersCount = ClassicDatabase.CLASSIC_SURFERS.size
+    val unlockedSurfersCount = remember(st, uiTrigger) {
+        if (st == null) 0 else ClassicDatabase.CLASSIC_SURFERS.count { ClassicCryptoAndSyncManager.isSurferUnlocked(st, it.first) }
+    }
+
+    // Счётчик всех дополнительных подскинов (костюмов кроме default)
+    val totalSubOutfitsCount = remember {
+        ClassicDatabase.CLASSIC_SURFERS.sumOf { (_, pair) -> pair.second.count { it != "default" } }
+    }
+    val unlockedSubOutfitsCount = remember(st, uiTrigger) {
+        if (st == null) 0 else ClassicDatabase.CLASSIC_SURFERS.sumOf { (sId, pair) ->
+            val owned = ClassicCryptoAndSyncManager.getOwnedOutfitsForSurfer(st, sId)
+            pair.second.count { it != "default" && owned.contains(it) }
+        }
+    }
+
+    // Счётчик досок и способностей досок
+    val totalBoardsCount = ClassicDatabase.CLASSIC_BOARDS.size
+    val unlockedBoardsCount = remember(st, uiTrigger) {
+        if (st == null) 0 else ClassicDatabase.CLASSIC_BOARDS.count { ClassicCryptoAndSyncManager.isBoardUnlocked(st, it.first) }
+    }
+    val totalBoardUpgradesCount = remember {
+        ClassicDatabase.CLASSIC_BOARDS.sumOf { it.second.second.size }
+    }
+    val unlockedBoardUpgradesCount = remember(st, uiTrigger) {
+        if (st == null) 0 else ClassicDatabase.CLASSIC_BOARDS.sumOf { (bId, pair) ->
+            val owned = ClassicCryptoAndSyncManager.getOwnedUpgradesForBoard(st, bId)
+            pair.second.count { owned.contains(it) }
+        }
+    }
+
+    // Счётчик рамок и аватарок
+    val totalFramesCount = ClassicDatabase.ALL_FRAMES.size
+    val unlockedFramesCount = remember(st, uiTrigger) {
+        if (st == null) 0 else ClassicDatabase.ALL_FRAMES.count { ClassicCryptoAndSyncManager.isFrameUnlocked(st, it.first) }
+    }
+    val totalPortraitsCount = ClassicDatabase.ALL_PORTRAITS.size
+    val unlockedPortraitsCount = remember(st, uiTrigger) {
+        if (st == null) 0 else ClassicDatabase.ALL_PORTRAITS.count { ClassicCryptoAndSyncManager.isPortraitUnlocked(st, it.first) }
+    }
 
     Scaffold(
         topBar = {
@@ -176,9 +215,9 @@ fun ClassicScreen(
                     val tabs = listOf(
                         "💰 Кошелёк",
                         "🏆 Ивенты & Медали",
-                        "🏄 Сёрферы ($unlockedSurfersCount/${ClassicDatabase.CLASSIC_SURFERS.size})",
-                        "🛹 Доски ($unlockedBoardsCount/${ClassicDatabase.CLASSIC_BOARDS.size})",
-                        "🖼️ Рамки & Аватарки ($unlockedFramesCount|$unlockedPortraitsCount)",
+                        "🏄 Сёрферы ($unlockedSurfersCount/$totalSurfersCount | 👕$unlockedSubOutfitsCount/$totalSubOutfitsCount)",
+                        "🛹 Доски ($unlockedBoardsCount/$totalBoardsCount | ⚡$unlockedBoardUpgradesCount/$totalBoardUpgradesCount)",
+                        "🖼️ Рамки ($unlockedFramesCount/$totalFramesCount) & Аватарки ($unlockedPortraitsCount/$totalPortraitsCount)",
                         "⭐ Достижения"
                     )
                     tabs.forEachIndexed { idx, title ->
@@ -188,7 +227,7 @@ fun ClassicScreen(
                                 classicState?.let { applyUIToState(it) }
                                 selectedTab = idx
                             },
-                            text = { Text(title) }
+                            text = { Text(title, fontSize = 12.sp) }
                         )
                     }
                 }
@@ -235,7 +274,7 @@ fun ClassicScreen(
                 }
             } else {
                 when (selectedTab) {
-                    // ВКЛАДКА 0: КОШЕЛЁК
+                    // ВКЛАДКА 0: КОШЕЛЁК И ТОКЕН-ПЕРСОНАЖИ
                     0 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -281,6 +320,16 @@ fun ClassicScreen(
                                             log("💎 9.99M Монет и 999K Ключей начислено!")
                                         }) { Text("💎 Монеты + Ключи MAX", fontSize = 11.sp) }
                                     }
+
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            pushUndo()
+                                            ClassicCryptoAndSyncManager.unlockAllTokenCharactersAndMaxTokens(st)
+                                            uiTrigger++
+                                            log("🎸 Все 5 токен-персонажей (Jake, Tricky, Fresh, Yutani, Spike) и их токены открыты!")
+                                        }
+                                    ) { Text("🎸 Открыть токен-персонажей (Tricky, Fresh, Yutani, Spike)", fontSize = 11.sp) }
                                 }
                             }
 
@@ -426,7 +475,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 2: СЁРФЕРЫ
+                    // ВКЛАДКА 2: СЁРФЕРЫ И ПОДСКИНЫ (С ТОЧНЫМИ СЧЁТЧИКАМИ)
                     2 -> {
                         val filteredSurfers = remember(searchQuery, surferCollectionFilter, uiTrigger) {
                             ClassicDatabase.CLASSIC_SURFERS.filter { (id, pair) ->
@@ -452,10 +501,17 @@ fun ClassicScreen(
 
                         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
                             Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "📊 Сёрферов: $unlockedSurfersCount / $totalSurfersCount | Подскинов (Костюмов): $unlockedSubOutfitsCount / $totalSubOutfitsCount",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF81C784)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
-                                label = { Text("🔍 Поиск сёрфера или подскина (напр. blob, onione, robo)...") },
+                                label = { Text("🔍 Поиск сёрфера или подскина (напр. bobTheBlob, seanSnow, slimeOutfit)...") },
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Spacer(modifier = Modifier.height(6.dp))
@@ -479,8 +535,8 @@ fun ClassicScreen(
                                 pushUndo()
                                 ClassicCryptoAndSyncManager.unlockAllClassicSurfersInMemory(st)
                                 uiTrigger++
-                                log("🏄 Все ${ClassicDatabase.CLASSIC_SURFERS.size} сёрферов и все костюмы открыты!")
-                            }) { Text("🏄 Открыть всех сёрферов и костюмы") }
+                                log("🏄 Все $totalSurfersCount сёрферов и $totalSubOutfitsCount подскинов открыты!")
+                            }) { Text("🏄 Открыть всех $totalSurfersCount сёрферов и $totalSubOutfitsCount подскинов") }
                             Spacer(modifier = Modifier.height(6.dp))
 
                             LazyColumn(
@@ -503,9 +559,9 @@ fun ClassicScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text(name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                    Text("$name ($id)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                                     Text(
-                                                        text = if (isUnlocked) "✅ ОТКРЫТ (${ownedOutfits.size}/${outfits.size} костюмов)" else "🔒 ЗАКРЫТ",
+                                                        text = if (isUnlocked) "✅ ОТКРЫТ (${ownedOutfits.size}/${outfits.size} скинов)" else "🔒 ЗАКРЫТ (0/${outfits.size} скинов)",
                                                         color = if (isUnlocked) Color(0xFF81C784) else Color(0xFFE57373),
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 12.sp
@@ -548,18 +604,31 @@ fun ClassicScreen(
                                                         val isHighlight = searchQuery.isNotBlank() && outfitId.contains(searchQuery, ignoreCase = true)
                                                         Row(
                                                             verticalAlignment = Alignment.CenterVertically,
-                                                            modifier = if (isHighlight) Modifier.background(Color(0xFF33691E)) else Modifier
+                                                            modifier = (if (isHighlight) Modifier.background(Color(0xFF33691E)) else Modifier).fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.SpaceBetween
                                                         ) {
-                                                            Checkbox(
-                                                                checked = hasOutfit,
-                                                                enabled = outfitId != "default",
-                                                                onCheckedChange = { checked ->
+                                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                                Checkbox(
+                                                                    checked = hasOutfit,
+                                                                    enabled = outfitId != "default",
+                                                                    onCheckedChange = { checked ->
+                                                                        pushUndo()
+                                                                        ClassicCryptoAndSyncManager.toggleSurferOutfit(st, id, outfitId, checked)
+                                                                        uiTrigger++
+                                                                    }
+                                                                )
+                                                                Text("Скин: $outfitId", fontSize = 12.sp, fontWeight = if (isHighlight) FontWeight.Bold else FontWeight.Normal)
+                                                            }
+                                                            OutlinedButton(
+                                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                                onClick = {
                                                                     pushUndo()
-                                                                    ClassicCryptoAndSyncManager.toggleSurferOutfit(st, id, outfitId, checked)
+                                                                    ClassicCryptoAndSyncManager.toggleSurferOutfit(st, id, outfitId, true)
+                                                                    ClassicCryptoAndSyncManager.selectSurfer(st, id, outfitId)
                                                                     uiTrigger++
+                                                                    log("👕 Надет скин '$outfitId' для $name")
                                                                 }
-                                                            )
-                                                            Text("Костюм: $outfitId", fontSize = 12.sp, fontWeight = if (isHighlight) FontWeight.Bold else FontWeight.Normal)
+                                                            ) { Text("Надеть", fontSize = 10.sp) }
                                                         }
                                                     }
                                                 }
@@ -571,32 +640,65 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 3: ДОСКИ (ВКЛЮЧАЯ TORITO)
+                    // ВКЛАДКА 3: ДОСКИ (FIRE STARTER, TORITO, SMOKING SLIME И ДР. + СЧЁТЧИКИ)
                     3 -> {
-                        val filteredBoards = remember(searchQuery, uiTrigger) {
+                        val filteredBoards = remember(searchQuery, boardFilterMode, uiTrigger) {
                             ClassicDatabase.CLASSIC_BOARDS.filter { (id, pair) ->
-                                id.contains(searchQuery, ignoreCase = true) ||
-                                pair.first.contains(searchQuery, ignoreCase = true) ||
-                                pair.second.any { it.contains(searchQuery, ignoreCase = true) }
+                                val matchesSearch = searchQuery.isBlank() ||
+                                        id.contains(searchQuery, ignoreCase = true) ||
+                                        pair.first.contains(searchQuery, ignoreCase = true) ||
+                                        pair.second.any { it.contains(searchQuery, ignoreCase = true) }
+
+                                val isUnlocked = ClassicCryptoAndSyncManager.isBoardUnlocked(st, id)
+                                val matchesFilter = when (boardFilterMode) {
+                                    "Открытые" -> isUnlocked
+                                    "Закрытые" -> !isUnlocked
+                                    "Со способностями" -> pair.second.isNotEmpty()
+                                    else -> true
+                                }
+                                matchesSearch && matchesFilter
                             }
                         }
                         val currentSelectedBoard = st.boards.optString("selected", "default")
 
                         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
                             Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "📊 Досок: $unlockedBoardsCount / $totalBoardsCount | Способностей досок: $unlockedBoardUpgradesCount / $totalBoardUpgradesCount",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF81C784)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
-                                label = { Text("🔍 Поиск доски (напр. torito, blob, monster)...") },
+                                label = { Text("🔍 Поиск доски (напр. fireStarter, torito, smokingSlime)...") },
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Spacer(modifier = Modifier.height(6.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                listOf("Все", "Открытые", "Закрытые", "Со способностями").forEach { mode ->
+                                    FilterChip(
+                                        selected = boardFilterMode == mode,
+                                        onClick = { boardFilterMode = mode },
+                                        label = { Text(mode, fontSize = 12.sp) }
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+
                             Button(modifier = Modifier.fillMaxWidth(), onClick = {
                                 pushUndo()
                                 ClassicCryptoAndSyncManager.unlockAllClassicBoardsInMemory(st)
                                 uiTrigger++
-                                log("🛹 Все ${ClassicDatabase.CLASSIC_BOARDS.size} досок и их способности открыты!")
-                            }) { Text("🛹 Открыть все ${ClassicDatabase.CLASSIC_BOARDS.size} досок со способностями") }
+                                log("🛹 Все $totalBoardsCount досок и $totalBoardUpgradesCount способностей открыты!")
+                            }) { Text("🛹 Открыть все $totalBoardsCount досок и $totalBoardUpgradesCount способностей") }
                             Spacer(modifier = Modifier.height(6.dp))
 
                             LazyColumn(
@@ -618,9 +720,9 @@ fun ClassicScreen(
                                                 horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text(name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                    Text("$name ($id)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                                     Text(
-                                                        text = if (isUnlocked) "✅ ОТКРЫТА (${ownedUpgrades.size}/${upgrades.size} способностей)" else "🔒 ЗАКРЫТА",
+                                                        text = if (isUnlocked) "✅ ОТКРЫТА (${ownedUpgrades.size}/${upgrades.size} апгрейдов)" else "🔒 ЗАКРЫТА",
                                                         color = if (isUnlocked) Color(0xFF81C784) else Color(0xFFE57373),
                                                         fontWeight = FontWeight.Bold,
                                                         fontSize = 12.sp
@@ -669,7 +771,7 @@ fun ClassicScreen(
                                                                     uiTrigger++
                                                                 }
                                                             )
-                                                            Text("Способность: $upgId", fontSize = 12.sp)
+                                                            Text("Апгрейд: $upgId", fontSize = 12.sp)
                                                         }
                                                     }
                                                 }
@@ -681,15 +783,73 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 4: РАМКИ И АВАТАРКИ (ВКЛЮЧАЯ ВСЕХ BOB THE BLOB)
+                    // ВКЛАДКА 4: РАМКИ И АВАТАРКИ С ПОИСКОМ И ФИЛЬТРАМИ
                     4 -> {
                         val currentFrame = st.frames.optString("selected", "default_frame")
-                        val currentPortrait = st.portraits.optString("selected", "portrait_jake_default")
+                        val currentPortrait = st.portraits.optString("selected", "jake_portrait")
 
-                        Column(
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
+                        val filteredFrames = remember(profileItemsSearch, profileItemsFilter, uiTrigger) {
+                            if (profileItemsFilter == "Только Аватарки") emptyList()
+                            else ClassicDatabase.ALL_FRAMES.filter { (id, title) ->
+                                val matchesSearch = profileItemsSearch.isBlank() ||
+                                        id.contains(profileItemsSearch, ignoreCase = true) ||
+                                        title.contains(profileItemsSearch, ignoreCase = true)
+                                val isUnlocked = ClassicCryptoAndSyncManager.isFrameUnlocked(st, id)
+                                val matchesStatus = when (profileItemsFilter) {
+                                    "Открытые" -> isUnlocked
+                                    "Закрытые" -> !isUnlocked
+                                    else -> true
+                                }
+                                matchesSearch && matchesStatus
+                            }
+                        }
+
+                        val filteredPortraits = remember(profileItemsSearch, profileItemsFilter, uiTrigger) {
+                            if (profileItemsFilter == "Только Рамки") emptyList()
+                            else ClassicDatabase.ALL_PORTRAITS.filter { (id, title) ->
+                                val matchesSearch = profileItemsSearch.isBlank() ||
+                                        id.contains(profileItemsSearch, ignoreCase = true) ||
+                                        title.contains(profileItemsSearch, ignoreCase = true)
+                                val isUnlocked = ClassicCryptoAndSyncManager.isPortraitUnlocked(st, id)
+                                val matchesStatus = when (profileItemsFilter) {
+                                    "Открытые" -> isUnlocked
+                                    "Закрытые" -> !isUnlocked
+                                    else -> true
+                                }
+                                matchesSearch && matchesStatus
+                            }
+                        }
+
+                        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "📊 Рамок: $unlockedFramesCount / $totalFramesCount | Аватарок: $unlockedPortraitsCount / $totalPortraitsCount",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF81C784)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            OutlinedTextField(
+                                value = profileItemsSearch,
+                                onValueChange = { profileItemsSearch = it },
+                                label = { Text("🔍 Поиск рамки или аватарки (напр. blob, brawl, seansnow)...") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                listOf("Все", "Только Рамки", "Только Аватарки", "Открытые", "Закрытые").forEach { mode ->
+                                    FilterChip(
+                                        selected = profileItemsFilter == mode,
+                                        onClick = { profileItemsFilter = mode },
+                                        label = { Text(mode, fontSize = 12.sp) }
+                                    )
+                                }
+                            }
                             Spacer(modifier = Modifier.height(6.dp))
 
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -697,99 +857,127 @@ fun ClassicScreen(
                                     pushUndo()
                                     ClassicCryptoAndSyncManager.unlockAllFramesInMemory(st)
                                     uiTrigger++
-                                    log("🖼️ Все ${ClassicDatabase.ALL_FRAMES.size} рамок открыты!")
-                                }) { Text("🖼️ Все рамки") }
+                                    log("🖼️ Все $totalFramesCount рамок открыты!")
+                                }) { Text("🖼️ Открыть все $totalFramesCount рамок", fontSize = 11.sp) }
 
                                 Button(modifier = Modifier.weight(1f), onClick = {
                                     pushUndo()
                                     ClassicCryptoAndSyncManager.unlockAllPortraitsInMemory(st)
                                     uiTrigger++
-                                    log("👤 Все ${ClassicDatabase.ALL_PORTRAITS.size} аватарок открыты!")
-                                }) { Text("👤 Все аватарки") }
+                                    log("👤 Все $totalPortraitsCount аватарок открыты!")
+                                }) { Text("👤 Открыть все $totalPortraitsCount аватарок", fontSize = 11.sp) }
                             }
+                            Spacer(modifier = Modifier.height(6.dp))
 
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("🖼️ Рамки Профиля ($unlockedFramesCount/${ClassicDatabase.ALL_FRAMES.size})", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    ClassicDatabase.ALL_FRAMES.forEach { (frameId, frameTitle) ->
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                contentPadding = PaddingValues(bottom = 90.dp)
+                            ) {
+                                if (filteredFrames.isNotEmpty()) {
+                                    item {
+                                        Text(
+                                            "🖼️ Рамки Профиля (${filteredFrames.size}):",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = Color(0xFF90CAF9),
+                                            modifier = Modifier.padding(vertical = 4.dp)
+                                        )
+                                    }
+                                    items(filteredFrames, key = { "frame_${it.first}" }) { (frameId, frameTitle) ->
                                         val isUnlocked = ClassicCryptoAndSyncManager.isFrameUnlocked(st, frameId)
                                         val isEquipped = currentFrame == frameId
 
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                                Checkbox(
-                                                    checked = isUnlocked,
-                                                    onCheckedChange = { checked ->
-                                                        pushUndo()
-                                                        ClassicCryptoAndSyncManager.toggleFrameUnlock(st, frameId, checked)
-                                                        uiTrigger++
-                                                    }
-                                                )
-                                                Text(frameTitle, fontSize = 13.sp)
-                                            }
-                                            OutlinedButton(
-                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                                onClick = {
-                                                    pushUndo()
-                                                    ClassicCryptoAndSyncManager.selectFrame(st, frameId)
-                                                    uiTrigger++
-                                                    log("🖼️ Выбрана рамка: $frameTitle")
-                                                }
+                                        Card(modifier = Modifier.fillMaxWidth()) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
-                                                Text(if (isEquipped) "⭐ Надет" else "Надеть", fontSize = 11.sp)
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                    Checkbox(
+                                                        checked = isUnlocked,
+                                                        onCheckedChange = { checked ->
+                                                            pushUndo()
+                                                            ClassicCryptoAndSyncManager.toggleFrameUnlock(st, frameId, checked)
+                                                            uiTrigger++
+                                                        }
+                                                    )
+                                                    Column {
+                                                        Text(frameTitle, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                                        Text("ID: $frameId", fontSize = 10.sp, color = Color.Gray)
+                                                    }
+                                                }
+                                                OutlinedButton(
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                    onClick = {
+                                                        pushUndo()
+                                                        ClassicCryptoAndSyncManager.selectFrame(st, frameId)
+                                                        uiTrigger++
+                                                        log("🖼️ Надет рамка: $frameTitle ($frameId)")
+                                                    }
+                                                ) {
+                                                    Text(if (isEquipped) "⭐ Надет" else "Надеть", fontSize = 11.sp)
+                                                }
                                             }
                                         }
                                     }
                                 }
-                            }
 
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("👤 Портреты и Аватарки ($unlockedPortraitsCount/${ClassicDatabase.ALL_PORTRAITS.size})", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    ClassicDatabase.ALL_PORTRAITS.forEach { (portraitId, portraitTitle) ->
+                                if (filteredPortraits.isNotEmpty()) {
+                                    item {
+                                        Text(
+                                            "👤 Портреты / Аватарки (${filteredPortraits.size}):",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = Color(0xFF90CAF9),
+                                            modifier = Modifier.padding(vertical = 4.dp)
+                                        )
+                                    }
+                                    items(filteredPortraits, key = { "portrait_${it.first}" }) { (portraitId, portraitTitle) ->
                                         val isUnlocked = ClassicCryptoAndSyncManager.isPortraitUnlocked(st, portraitId)
                                         val isEquipped = currentPortrait == portraitId
 
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                                Checkbox(
-                                                    checked = isUnlocked,
-                                                    onCheckedChange = { checked ->
-                                                        pushUndo()
-                                                        ClassicCryptoAndSyncManager.togglePortraitUnlock(st, portraitId, checked)
-                                                        uiTrigger++
-                                                    }
-                                                )
-                                                Text(portraitTitle, fontSize = 13.sp)
-                                            }
-                                            OutlinedButton(
-                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                                onClick = {
-                                                    pushUndo()
-                                                    ClassicCryptoAndSyncManager.selectPortrait(st, portraitId)
-                                                    uiTrigger++
-                                                    log("👤 Выбран портрет: $portraitTitle")
-                                                }
+                                        Card(modifier = Modifier.fillMaxWidth()) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
-                                                Text(if (isEquipped) "⭐ Надет" else "Надеть", fontSize = 11.sp)
+                                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                    Checkbox(
+                                                        checked = isUnlocked,
+                                                        onCheckedChange = { checked ->
+                                                            pushUndo()
+                                                            ClassicCryptoAndSyncManager.togglePortraitUnlock(st, portraitId, checked)
+                                                            uiTrigger++
+                                                        }
+                                                    )
+                                                    Column {
+                                                        Text(portraitTitle, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                                        Text("ID: $portraitId", fontSize = 10.sp, color = Color.Gray)
+                                                    }
+                                                }
+                                                OutlinedButton(
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                    onClick = {
+                                                        pushUndo()
+                                                        ClassicCryptoAndSyncManager.selectPortrait(st, portraitId)
+                                                        uiTrigger++
+                                                        log("👤 Надет портрет: $portraitTitle ($portraitId)")
+                                                    }
+                                                ) {
+                                                    Text(if (isEquipped) "⭐ Надет" else "Надеть", fontSize = 11.sp)
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
-                            Spacer(modifier = Modifier.height(90.dp))
                         }
                     }
 
-                    // ВКЛАДКА 5: ДОСТИЖЕНИЯ И КОРОБКИ
+                    // ВКЛАДКА 5: ДОСТИЖЕНИЯ (БЕЗ НЕРАБОЧИХ ЛУТБОКСОВ)
                     5 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -800,7 +988,7 @@ fun ClassicScreen(
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("⭐ Эксклюзивные Достижения", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("Выполняет все скрытые ачивки: друг медийной личности, полный сбор Brawl Stars, Rivals и др.", fontSize = 12.sp, color = Color.Gray)
+                                    Text("Выполняет все скрытые ачивки: друг медийной личности, полный сбор Brawl Stars, Rivals, Core Crew и др.", fontSize = 12.sp, color = Color.Gray)
 
                                     Button(
                                         modifier = Modifier.fillMaxWidth(),
@@ -820,31 +1008,6 @@ fun ClassicScreen(
                                             Text(ach.description, fontSize = 11.sp, color = Color.Gray)
                                         }
                                     }
-                                }
-                            }
-
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("🎁 Выдача Сундуков (Lootboxes)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    OutlinedTextField(
-                                        value = lootboxCount,
-                                        onValueChange = { lootboxCount = it },
-                                        label = { Text("Количество коробок") },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                    ClassicDatabase.LOOTBOX_TYPES.forEach { (bId, bTitle) ->
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            RadioButton(selected = selectedLootbox == bId, onClick = { selectedLootbox = bId })
-                                            Text(bTitle, fontSize = 13.sp)
-                                        }
-                                    }
-                                    Button(modifier = Modifier.fillMaxWidth(), onClick = {
-                                        pushUndo()
-                                        val cnt = lootboxCount.toIntOrNull() ?: 10
-                                        ClassicCryptoAndSyncManager.addLootboxesToQueueInMemory(st, selectedLootbox, cnt)
-                                        log("🎁 Добавлено $cnt сундуков в очередь!")
-                                    }) { Text("🎁 Добавить сундуки") }
                                 }
                             }
                             Spacer(modifier = Modifier.height(90.dp))
