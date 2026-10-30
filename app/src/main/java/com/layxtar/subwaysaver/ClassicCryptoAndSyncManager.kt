@@ -110,7 +110,7 @@ object ClassicCryptoAndSyncManager {
                 version to JSONObject(if (dataStr.startsWith("{")) dataStr else decryptBase64Data(dataStr))
             } else version to outerJson
         } catch (e: Exception) {
-            log("⚠️ Ошибка чтения $fileName:${e.message}")
+            log("⚠️ Ошибка чтения $fileName: ${e.message}")
             defaultVer to createDefaultStructureForFile(fileName)
         }
     }
@@ -122,7 +122,7 @@ object ClassicCryptoAndSyncManager {
             val wrapper = JSONObject().put("version", version).put("data", encryptToBase64Data(innerJson.toString()))
             CryptoAndSyncManager.writeFileViaShizuku(path, wrapper.toString().toByteArray(Charsets.UTF_8), log)
         } catch (e: Exception) {
-            log("❌ Ошибка записи $fileName:${e.message}")
+            log("❌ Ошибка записи $fileName: ${e.message}")
             false
         }
     }
@@ -224,9 +224,6 @@ object ClassicCryptoAndSyncManager {
         wallet.put("currencies", currencies)
     }
 
-    // ==================== ЖЕТОНЫ ЛЕТУЧИХ МЫШЕК (SEASON HUNT TOKENS) ====================
-    // Синхронно читает и записывает жетоны охоты (летучих мышек) и в wallet.json, и в season_hunt.json!
-
     fun getSeasonHuntBatTokens(state: ClassicMemoryState): Long {
         val walletVal = state.wallet.optJSONObject("currencies")?.optJSONObject("12")?.optLong("value", 0L) ?: 0L
         val shVal = state.seasonHunt.optLong("tokensCollected", state.seasonHunt.optLong("collectedTokens", 0L))
@@ -234,10 +231,7 @@ object ClassicCryptoAndSyncManager {
     }
 
     fun setSeasonHuntBatTokens(state: ClassicMemoryState, amount: Long) {
-        // 1. Записываем в wallet.json (сохраняя оригинальный contextData текущего сезона, если он уже есть)
         setCurrencyInMemory(state.wallet, "12", amount)
-
-        // Если в wallet.json уже есть другие сезонные валюты (с expirationType != 0), обновляем их тоже
         val currencies = state.wallet.optJSONObject("currencies")
         if (currencies != null) {
             val keys = currencies.keys()
@@ -249,14 +243,11 @@ object ClassicCryptoAndSyncManager {
                 }
             }
         }
-
-        // 2. Синхронно записываем прогресс летучих мышек во все поля season_hunt.json
         state.seasonHunt.put("tokensCollected", amount)
         state.seasonHunt.put("collectedTokens", amount)
         state.seasonHunt.put("currentPoints", amount)
         state.seasonHunt.put("points", amount)
 
-        // Если в внутри season_hunt.json есть вложенный объект активного сезона (например, seasonData / activeSeason), обновляем и его
         val shKeys = state.seasonHunt.keys().asSequence().toList()
         for (k in shKeys) {
             val sub = state.seasonHunt.optJSONObject(k) ?: continue
@@ -264,7 +255,6 @@ object ClassicCryptoAndSyncManager {
             if (sub.has("collectedTokens")) sub.put("collectedTokens", amount)
             if (sub.has("points")) sub.put("points", amount)
             if (sub.has("currentPoints")) sub.put("currentPoints", amount)
-            // Снимаем блокировку ожидания по дням (таймер закрытых ярусов)
             if (sub.has("unlockedTier")) sub.put("unlockedTier", 40)
         }
     }
@@ -347,6 +337,8 @@ object ClassicCryptoAndSyncManager {
         }
     }
 
+    // ==================== АКТИВНЫЕ СОБЫТИЯ И НАКРУТКА ОЧКОВ / ЭТАПОВ ====================
+
     fun getActiveChallenges(state: ClassicMemoryState): List<ActiveChallengeInfo> {
         val list = mutableListOf<ActiveChallengeInfo>()
         val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return list
@@ -367,13 +359,15 @@ object ClassicCryptoAndSyncManager {
                     if (req > maxReq) maxReq = req
                 }
             }
+            if (maxReq == 0L) maxReq = 15000000L
 
             val friendlyTitle = when {
-                key.contains("marathon", ignoreCase = true) -> "🏃 Марафон (Marathon)"
-                key.contains("pvp", ignoreCase = true) || key.contains("showdown", ignoreCase = true) -> "🏁 PvP-Забег (Subway Showdown)"
-                key.contains("lava", ignoreCase = true) -> "🌋 Пол — это лава (Floor Is Lava)"
-                key.contains("tag", ignoreCase = true) || key.contains("time", ignoreCase = true) -> "⏱️ Забег на время (Tag Time Attack)"
-                key.contains("mystery", ignoreCase = true) -> "🎁 Таинственные препятствия"
+                key.contains("marathon", ignoreCase = true) -> "🏃 Марафон ($key)"
+                key.contains("pvp", ignoreCase = true) || key.contains("showdown", ignoreCase = true) -> "🏁 Забег с соперниками ($key)"
+                key.contains("lava", ignoreCase = true) -> "🌋 Пол — это лава ($key)"
+                key.contains("tag", ignoreCase = true) || key.contains("time", ignoreCase = true) -> "⏱️ Забег на время ($key)"
+                key.contains("mystery", ignoreCase = true) || key.contains("hurdle", ignoreCase = true) -> "🎁 Таинственные барьеры ($key)"
+                key.contains("plant", ignoreCase = true) || key.contains("invasion", ignoreCase = true) -> "🌿 Вторжение лоз ($key)"
                 else -> "🏆 Событие: $key"
             }
 
@@ -388,6 +382,7 @@ object ClassicCryptoAndSyncManager {
         targetScore: Long,
         unlockStagesReward: Boolean
     ) {
+        state.challenges.put("patchVersion", 2)
         val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return
         val ch = challengeStates.optJSONObject(challengeId) ?: return
 
@@ -395,15 +390,61 @@ object ClassicCryptoAndSyncManager {
         ch.put("highScore", maxOf(ch.optLong("highScore", 0L), targetScore))
         ch.put("lastSeenScore", targetScore)
         ch.put("lastSubmittedScore", targetScore)
-        ch.optJSONObject("requirements")?.put("cooldownItems", JSONObject())
+        ch.put("isCompleted", true)
+        ch.remove("rewardUnlockOffset")
+        ch.remove("stageUnlockTimestamp")
 
-        if (unlockStagesReward) {
+        ch.optJSONObject("requirements")?.apply {
+            put("cooldownItems", JSONObject())
+            remove("cooldownEndTime")
+        }
+
+        val rStates = ch.optJSONArray("rewardStates")
+        if (rStates != null) {
+            var unlockedStageIdx = 0
+            for (i in 0 until rStates.length()) {
+                val rs = rStates.optJSONObject(i) ?: continue
+                val reqScore = rs.optLong("RequiredScore", 0L)
+                rs.put("AdRequired", false)
+                rs.remove("UnlockTime")
+                rs.remove("CooldownEnd")
+
+                if (targetScore >= reqScore || unlockStagesReward) {
+                    unlockedStageIdx = i + 1
+                    if (rs.optInt("State", 0) == 0 || rs.optInt("State", 0) == 2) {
+                        rs.put("State", 1)
+                    }
+                }
+            }
+            if (ch.has("currentStage")) ch.put("currentStage", unlockedStageIdx)
+            if (ch.has("unlockedStage")) ch.put("unlockedStage", unlockedStageIdx)
+        }
+
+        val stagesArr = ch.optJSONArray("stages")
+        if (stagesArr != null) {
+            for (i in 0 until stagesArr.length()) {
+                val stg = stagesArr.optJSONObject(i) ?: continue
+                stg.put("currentScore", targetScore)
+                stg.put("isUnlocked", true)
+                stg.put("isCompleted", true)
+            }
+        }
+    }
+
+    fun completeAllChallengesInMemory(state: ClassicMemoryState, customScore: Long = 25000000L) {
+        val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return
+        val keys = challengeStates.keys().asSequence().toList()
+        for (key in keys) {
+            val ch = challengeStates.optJSONObject(key) ?: continue
+            var maxReq = customScore
             val rStates = ch.optJSONArray("rewardStates")
             if (rStates != null) {
                 for (i in 0 until rStates.length()) {
-                    rStates.getJSONObject(i).put("AdRequired", false)
+                    val req = rStates.getJSONObject(i).optLong("RequiredScore", 0L)
+                    if (req > maxReq) maxReq = req
                 }
             }
+            setChallengeScoreCustom(state, key, maxReq, true)
         }
     }
 
