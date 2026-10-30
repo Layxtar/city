@@ -138,7 +138,7 @@ object Pvz2Manager {
         return writeJsonAsRton(getPpDatPath(), ppJson, log)
     }
 
-    // ==================== 1. ПОЛНЫЙ МАГАЗИН ЗА 1 МОНЕТУ (ТОЧНАЯ КОПИЯ МЕТОДА ИЗ ФАЙЛОВ + НОВЫЕ РАСТЕНИЯ + УДАЛЕНИЕ ВАЛЮТ) ====================
+    // ==================== 1. ПОЛНЫЙ МАГАЗИН ЗА 1 МОНЕТУ (ТОЧНЫЕ СЕМЕНА ДЛЯ КАЖДОГО ИЗ 214 РАСТЕНИЙ + DELETE ITEMS) ====================
 
     fun installFullMegaShopAllPlantsSkinsAndSeeds(cdnDir: String, log: (String) -> Unit): Boolean {
         log("⏳ 1/5: Запись фильтра магазина magento_filter.rton (все 214 растений и 342 костюма)...")
@@ -149,7 +149,7 @@ object Pvz2Manager {
         val layoutJson = buildMarketLayoutJson()
         if (!writeJsonAsRton("$cdnDir/market_layout.rton", layoutJson, log)) return false
 
-        log("⏳ 3/5: Прошивка слотов и таблиц лута семян в pinatacoreloot.rton (включая новые растения и All Plants XP)...")
+        log("⏳ 3/5: Прошивка индивидуальных таблиц семян в pinatacoreloot.rton для каждого из 214 растений...")
         patchPinataCoreLootExactMethod(cdnDir, log)
 
         log("⏳ 4/5: Генерация товаров в products.rton (сохранены существующие товары по 1🪙 + семена, скины, удаление валют и бонусы)...")
@@ -159,11 +159,10 @@ object Pvz2Manager {
         log("⏳ 5/5: Запись расписания витрины market_schedule.rton...")
         if (!writeJsonAsRton("$cdnDir/market_schedule.rton", scheduleJson, log)) return false
 
-        log("🎉 Магазин успешно установлен! Проверяй вкладки Plants, Costumes, Seeds / Seeds2 / Seeds3, DeleteItems и Piñatas!")
+        log("🎉 Магазин успешно установлен! Каждый лот семян теперь выдаёт строго своё растение!")
         return true
     }
 
-    // 1. Точный magento_filter.rton из твоего файла magento_filter_2.json
     private fun buildMagentoFilterJson(): JSONObject {
         val plantSubTypes = JSONArray()
         Pvz2Database.ALL_PLANT_IDS.forEach { plantSubTypes.put(it) }
@@ -207,7 +206,6 @@ object Pvz2Manager {
         }
     }
 
-    // 2. Точный market_layout.rton из твоего файла market_layout_2.json (со вкладкой Delet / DeleteItems и без чужих имён)
     private fun buildMarketLayoutJson(): JSONObject {
         val mainClusters = JSONArray().apply {
             put("Promotions")
@@ -336,7 +334,68 @@ object Pvz2Manager {
         }
     }
 
-    // 3. ТОЧНЫЙ МЕТОД СЕМЯН ИЗ PINATACORELOOT_2.JSON + АВТО-КЛОНИРОВАНИЕ СТРУКТУРЫ ТАБЛИЦ ДЛЯ НОВЫХ РАСТЕНИЙ И МЕГА-ПИНЬЯТ!
+    // Рекурсивная функция глубокой замены строки в JSON:
+    // Заменяет любое вхождение "peashooter" / "akee" в склонированном шаблоне на точный plantId!
+    private fun replaceDeepPlantIdAndCount(
+        node: Any?,
+        sourcePlantName: String,
+        targetPlantId: String,
+        targetTableId: String,
+        targetAmount: Int
+    ) {
+        when (node) {
+            is JSONObject -> {
+                val keys = node.keys().asSequence().toList()
+                for (k in keys) {
+                    val v = node.opt(k)
+                    when {
+                        k.equals("Id", ignoreCase = true) || k.equals("TableId", ignoreCase = true) -> {
+                            node.put(k, targetTableId)
+                        }
+                        v is String -> {
+                            if (v.equals(sourcePlantName, ignoreCase = true) ||
+                                v.equals("peashooter", ignoreCase = true) ||
+                                v.equals("akee", ignoreCase = true)
+                            ) {
+                                node.put(k, targetPlantId)
+                            } else if (v.contains(sourcePlantName, ignoreCase = true)) {
+                                node.put(k, v.replace(sourcePlantName, targetPlantId, ignoreCase = true))
+                            }
+                        }
+                        v is Number -> {
+                            if (k.equals("Min", ignoreCase = true) ||
+                                k.equals("Max", ignoreCase = true) ||
+                                k.equals("Amount", ignoreCase = true) ||
+                                k.equals("Count", ignoreCase = true)
+                            ) {
+                                node.put(k, targetAmount)
+                            }
+                        }
+                        v is JSONArray || v is JSONObject -> {
+                            replaceDeepPlantIdAndCount(v, sourcePlantName, targetPlantId, targetTableId, targetAmount)
+                        }
+                    }
+                }
+            }
+            is JSONArray -> {
+                for (i in 0 until node.length()) {
+                    val elem = node.opt(i)
+                    if (elem is String) {
+                        if (elem.equals(sourcePlantName, ignoreCase = true) ||
+                            elem.equals("peashooter", ignoreCase = true) ||
+                            elem.equals("akee", ignoreCase = true)
+                        ) {
+                            node.put(i, targetPlantId)
+                        }
+                    } else if (elem is JSONObject || elem is JSONArray) {
+                        replaceDeepPlantIdAndCount(elem, sourcePlantName, targetPlantId, targetTableId, targetAmount)
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. ТОЧНАЯ ИНЪЕКЦИЯ СЛОТОВ И ТАБЛИЦ ДЛЯ ВСЕХ 214 РАСТЕНИЙ В PINATACORELOOT.RTON
     private fun patchPinataCoreLootExactMethod(cdnDir: String, log: (String) -> Unit) {
         val path = "$cdnDir/pinatacoreloot.rton"
         val json = readRtonAsJson(path, log) ?: return
@@ -350,15 +409,14 @@ object Pvz2Manager {
             val data = obj.optJSONObject("objdata") ?: continue
             if (data.has("SlotConfigs")) {
                 slotConfigsObj = data.optJSONObject("SlotConfigs")
-            } else if (obj.optString("objclass").contains("Table", ignoreCase = true) ||
-                data.has("Tables") || data.has("RewardsTables") || data.has("RewardTables") || data.has("RewardSubTables")
-            ) {
+            } else {
                 tablesParentData = data
             }
         }
 
+        // 1. Заполняем SlotConfigs для каждого из 214 растений:
+        // "free_seed_<plantId>1" -> RewardsTable: "seed_<plantId>1"
         if (slotConfigsObj != null) {
-            // 1. Создаём слоты "free_seed_<plantId>1" для всех 214 растений (точно как в pinatacoreloot_2.json!)
             for (plantId in Pvz2Database.ALL_PLANT_IDS) {
                 val slotKey = "free_seed_${plantId}1"
                 val tableKey = "seed_${plantId}1"
@@ -367,13 +425,13 @@ object Pvz2Manager {
                     put("BonusTable", "bonus_standard")
                     put("PercentBonusAward", 0)
                     put("PercentPinataAward", 1)
-                    put("PinataType", "free")
+                    put("PinataType", "")
                     put("RewardsTable", tableKey)
                     put("Slots", JSONArray().put("PlantXP"))
                 })
             }
 
-            // 2. Создаём 5 супер-слотов прокачки ВСЕХ растений сразу (Bronze, Silver, Gold, Max, 100M) как в pinatacoreloot_2.json!
+            // Пять супер-слотов прокачки всех растений сразу (All Plants XP)
             val multiSlots = JSONArray().apply {
                 repeat(Pvz2Database.ALL_PLANT_IDS.size) { put("PlantXP") }
             }
@@ -396,44 +454,41 @@ object Pvz2Manager {
             }
         }
 
-        // 3. Автоматически определяем точный формат таблиц наград в текущем pinatacoreloot.rton (на примере "peashooter1" / "akee1")
-        // и создаём по этому же шаблону таблицы "seed_<plantId>1" для ВСЕХ 214 растений (включая новые voltsnapdragon, thornwhip, pyroak)!
+        // 2. Заполняем второй объект (Tables / RewardsTables / RewardSubTables) так, чтобы у КАЖДОГО растения был свой собственный ID (а не peashooter!)
         if (tablesParentData != null) {
-            val tableDictKey = tablesParentData.keys().asSequence().firstOrNull { k ->
+            val tableKeyName = tablesParentData.keys().asSequence().firstOrNull { k ->
                 tablesParentData.opt(k) is JSONObject || tablesParentData.opt(k) is JSONArray
             }
 
-            if (tableDictKey != null) {
-                val container = tablesParentData.opt(tableDictKey)
+            if (tableKeyName != null) {
+                val container = tablesParentData.opt(tableKeyName)
+
+                // Вариант А: Таблицы хранятся в JSONObject (словарь по ключу таблицы, например "peashooter1": { ... })
                 if (container is JSONObject) {
-                    // Находим существующий рабочий шаблон одиночного семени (например, "peashooter1" или "akee1")
-                    val templateTable = container.optJSONObject("peashooter1")
-                        ?: container.optJSONObject("akee1")
-                        ?: container.optJSONObject("sunflower50")
+                    var sourcePlant = "peashooter"
+                    var templateObj = container.optJSONObject("peashooter1")
+                    if (templateObj == null) {
+                        sourcePlant = "akee"
+                        templateObj = container.optJSONObject("akee1")
+                    }
+                    if (templateObj == null) {
+                        sourcePlant = "sunflower"
+                        templateObj = container.optJSONObject("sunflower50")
+                    }
 
                     for (plantId in Pvz2Database.ALL_PLANT_IDS) {
                         val tableKey = "seed_${plantId}1"
-                        if (templateTable != null) {
-                            // Клонируем родную структуру игры и заменяем в ней имя растения и количество = 1!
-                            val cloned = JSONObject(templateTable.toString())
-                            val rewardsArr = cloned.optJSONArray("Rewards") ?: cloned.optJSONArray("SubTables")
-                            if (rewardsArr != null && rewardsArr.length() > 0) {
-                                val firstReward = rewardsArr.optJSONObject(0)
-                                if (firstReward != null) {
-                                    if (firstReward.has("Entities")) firstReward.put("Entities", JSONArray().put(plantId))
-                                    if (firstReward.has("Plant")) firstReward.put("Plant", plantId)
-                                    if (firstReward.has("Item")) firstReward.put("Item", plantId)
-                                    if (firstReward.has("Min")) firstReward.put("Min", 1)
-                                    if (firstReward.has("Max")) firstReward.put("Max", 1)
-                                    if (firstReward.has("Amount")) firstReward.put("Amount", 1)
-                                }
-                            }
+                        if (templateObj != null) {
+                            val cloned = JSONObject(templateObj.toString())
+                            // Рекурсивно заменяем "peashooter" во всей глубине объекта на точный plantId!
+                            replaceDeepPlantIdAndCount(cloned, sourcePlant, plantId, tableKey, 1)
                             container.put(tableKey, cloned)
                         } else {
                             container.put(tableKey, JSONObject().apply {
                                 put("Rewards", JSONArray().put(JSONObject().apply {
                                     put("Entities", JSONArray().put(plantId))
                                     put("Plant", plantId)
+                                    put("Item", plantId)
                                     put("Min", 1)
                                     put("Max", 1)
                                     put("Amount", 1)
@@ -444,7 +499,7 @@ object Pvz2Manager {
                         }
                     }
 
-                    // Создаём таблицы для 5 мега-пиньят (Bronze=100, Silver=1000, Gold=5000, Max=50000, 100M=100000000 семян на каждое растение!)
+                    // Таблицы для 5 мега-пиньят All Plants XP
                     val megaTiers = listOf(
                         "all_xp_plants_bronze_0" to 100,
                         "all_xp_plants_silver_0" to 1000,
@@ -455,18 +510,76 @@ object Pvz2Manager {
                     for ((tKey, amt) in megaTiers) {
                         val allRewards = JSONArray()
                         for (plantId in Pvz2Database.ALL_PLANT_IDS) {
-                            allRewards.put(JSONObject().apply {
-                                put("Entities", JSONArray().put(plantId))
-                                put("Plant", plantId)
-                                put("Min", amt)
-                                put("Max", amt)
-                                put("Amount", amt)
-                                put("Type", "PlantXP")
-                                put("Weight", 100)
-                            })
+                            if (templateObj != null) {
+                                val singleClone = JSONObject(templateObj.toString())
+                                replaceDeepPlantIdAndCount(singleClone, sourcePlant, plantId, tKey, amt)
+                                val subArr = singleClone.optJSONArray("Rewards") ?: singleClone.optJSONArray("SubTables")
+                                if (subArr != null && subArr.length() > 0) {
+                                    allRewards.put(subArr.getJSONObject(0))
+                                }
+                            } else {
+                                allRewards.put(JSONObject().apply {
+                                    put("Entities", JSONArray().put(plantId))
+                                    put("Plant", plantId)
+                                    put("Min", amt)
+                                    put("Max", amt)
+                                    put("Amount", amt)
+                                    put("Type", "PlantXP")
+                                    put("Weight", 100)
+                                })
+                            }
                         }
                         container.put(tKey, JSONObject().put("Rewards", allRewards))
                     }
+                    log("🌱 Сгенерировано ${Pvz2Database.ALL_PLANT_IDS.size} индивидуальных таблиц семян (JSONObject)!")
+                }
+                // Вариант Б: Таблицы хранятся в JSONArray (массив объектов [{"Id": "peashooter1", ...}])
+                else if (container is JSONArray) {
+                    var sourcePlant = "peashooter"
+                    var templateObj: JSONObject? = null
+                    val existingIds = mutableMapOf<String, Int>()
+
+                    for (i in 0 until container.length()) {
+                        val item = container.optJSONObject(i) ?: continue
+                        val idStr = item.optString("Id", item.optString("TableId", ""))
+                        if (idStr.isNotEmpty()) existingIds[idStr] = i
+                        if (idStr == "peashooter1") {
+                            sourcePlant = "peashooter"
+                            templateObj = item
+                        } else if (templateObj == null && idStr == "akee1") {
+                            sourcePlant = "akee"
+                            templateObj = item
+                        }
+                    }
+
+                    for (plantId in Pvz2Database.ALL_PLANT_IDS) {
+                        val tableKey = "seed_${plantId}1"
+                        val newEntry = if (templateObj != null) {
+                            JSONObject(templateObj.toString()).also { cloned ->
+                                replaceDeepPlantIdAndCount(cloned, sourcePlant, plantId, tableKey, 1)
+                            }
+                        } else {
+                            JSONObject().apply {
+                                put("Id", tableKey)
+                                put("Rewards", JSONArray().put(JSONObject().apply {
+                                    put("Entities", JSONArray().put(plantId))
+                                    put("Plant", plantId)
+                                    put("Min", 1)
+                                    put("Max", 1)
+                                    put("Amount", 1)
+                                    put("Type", "PlantXP")
+                                    put("Weight", 100)
+                                }))
+                            }
+                        }
+                        val existIdx = existingIds[tableKey]
+                        if (existIdx != null) {
+                            container.put(existIdx, newEntry)
+                        } else {
+                            container.put(newEntry)
+                        }
+                    }
+                    log("🌱 Сгенерировано ${Pvz2Database.ALL_PLANT_IDS.size} индивидуальных таблиц семян (JSONArray)!")
                 }
             }
         }
@@ -474,9 +587,6 @@ object Pvz2Manager {
         writeJsonAsRton(path, json, log)
     }
 
-    // 4. Сборка products.rton и market_schedule.rton:
-    // - делает все существующие товары игры по 1 монете
-    // - добавляет все 214 растений, 342 скина, семена по методу из твоих файлов, удаление валют и крутые бонусы!
     private fun buildProductsAndMarketScheduleExactMethod(
         cdnDir: String,
         log: (String) -> Unit
@@ -485,7 +595,7 @@ object Pvz2Manager {
         val productsArr = JSONArray()
         val addedSkus = mutableSetOf<String>()
 
-        // Сначала переносим существующие продукты игры и ставим им цену 1 монета (как в нашем первом удачном магазине!)
+        // Сохраняем существующие товары игры и ставим им цену 1 монета
         val origObjects = origProductsJson?.optJSONArray("objects")
         if (origObjects != null) {
             for (i in 0 until origObjects.length()) {
@@ -571,7 +681,7 @@ object Pvz2Manager {
             }
         }
 
-        // 1. Все 214 Растений + их Семена точно по методу из твоих файлов (ObjectType="pinata", ObjectItem="free_seed_<plantId>1")
+        // 1. Все 214 Растений + их индивидуальные Семена ("free_seed_<plantId>1")
         val allPlantSkus = JSONArray()
         val classicSeedTiers = listOf(1, 100, 10000)
         val newestSeedTiers = listOf(1, 100, 10000, 100000, 1000000)
@@ -607,10 +717,11 @@ object Pvz2Manager {
             val tiers = if (isNewest) newestSeedTiers else classicSeedTiers
             for (amt in tiers) {
                 val seedSku = "custom.SeedPacket.$plantId.$amt"
+                // Каждый лот ссылается строго на свой уникальный слот "free_seed_<plantId>1"!
                 addStoreProduct(
                     sku = seedSku,
-                    name = "SeedPacket - $plantId x$amt",
-                    desc = "$amt Seed Packets ($upper)",
+                    name = "SeedPacket - $plantId.$amt",
+                    desc = upper,
                     shortDesc = upper,
                     objectType = "pinata",
                     objectItem = "free_seed_${plantId}1",
@@ -620,10 +731,10 @@ object Pvz2Manager {
             }
         }
 
-        // 2. ИНТЕРЕСНЫЕ БОНУСНЫЕ ТОВАРЫ (Умножители наград Календаря/Квестов x200, Мега-Пиньяты прокачки всех растений сразу, No Ads Pack)
+        // 2. Умножители наград Календаря и Квестов x200
         val bonusMultipliers = listOf(
-            Triple("custom.Bonus.Calendar200x", "Calendar - 200x Rewards!", "calendar"),
-            Triple("custom.Bonus.Quest200x", "Quest - 200x Rewards!", "quest")
+            Triple("custom.Bonus.Calendar200x", "Calendar - 200x Rewards", "calendar"),
+            Triple("custom.Bonus.Quest200x", "Quest - 200x Rewards", "quest")
         )
         for ((bSku, bName, bItem) in bonusMultipliers) {
             addStoreProduct(
@@ -638,7 +749,7 @@ object Pvz2Manager {
             scheduledBundles.put(makeScheduleEntry("Bundles", bSku, "new"))
         }
 
-        // Мега-пиньяты прокачки сразу всех 214 растений во вкладке Piñatas!
+        // 3. Мега-пиньяты прокачки всех 214 растений сразу
         val allXpPinatas = listOf(
             Triple("custom.Pinata.All.Bronze", "All Plants XP (Bronze +100)", "free_all_xp_plants_bronze"),
             Triple("custom.Pinata.All.Silver", "All Plants XP (Silver +1,000)", "free_all_xp_plants_silver"),
@@ -659,7 +770,7 @@ object Pvz2Manager {
             scheduledPinatas.put(makeScheduleEntry("Pinatas", pSku, "new"))
         }
 
-        // Классические пиньяты миров и стихий (по 1, 100 и 10 000 шт.)
+        // 4. Пиньяты всех миров и стихий
         val worldPinatas = listOf(
             "egypt_gems" to "Ancient Egypt Piñata",
             "pirate_gems" to "Pirate Seas Piñata",
@@ -698,7 +809,7 @@ object Pvz2Manager {
             }
         }
 
-        // 3. Бандлы открытия всех растений в 1 клик
+        // 5. Бандлы открытия всех растений
         val bundlesList = listOf(
             Triple("custom.Bundle.Total", "Legendary Bundle (All 214 Plants)", "greenthumb"),
             Triple("custom.Bundle.AllPremium", "All Premium Plants Bundle", "kiwibeastbundle"),
@@ -719,7 +830,7 @@ object Pvz2Manager {
             scheduledBundles.put(makeScheduleEntry("Bundles", bSku))
         }
 
-        // 4. Все 342 Костюма
+        // 6. Все 342 Костюма
         for (costumeId in 1..342) {
             val cSku = "custom.Costume.$costumeId"
             addStoreProduct(
@@ -734,7 +845,7 @@ object Pvz2Manager {
             scheduledCostumes.put(makeScheduleEntry("Costumes", cSku))
         }
 
-        // 5. Все 40 Игровых Апгрейдов
+        // 7. Все 40 Игровых Апгрейдов
         for (upgId in Pvz2Database.GAME_UPGRADES) {
             val uSku = "custom.Upgrade.$upgId"
             addStoreProduct(
@@ -749,7 +860,7 @@ object Pvz2Manager {
             scheduledUpgrades.put(makeScheduleEntry("Upgrades", uSku))
         }
 
-        // 6. Положительные ресурсы (во вкладку Resources) + ОТРИЦАТЕЛЬНЫЕ РЕСУРСЫ ДЛЯ УДАЛЕНИЯ ВАЛЮТ (во вкладку DeleteItems / Delet)!
+        // 8. Положительные ресурсы + Удаление валют (DeleteItems)
         val resourceDefs = listOf(
             Triple("Coin", "coin", "Coins" to "DeletCoin"),
             Triple("Gem", "gem", "Gems" to "DeletGem"),
@@ -763,7 +874,6 @@ object Pvz2Manager {
 
         for ((prefix, objType, cats) in resourceDefs) {
             val (posCat, delCat) = cats
-            // Начисление валюты
             for (amt in positiveAmounts) {
                 val rSku = "custom.$prefix.$amt"
                 addStoreProduct(
@@ -777,7 +887,6 @@ object Pvz2Manager {
                 )
                 scheduledResources.put(makeScheduleEntry(posCat, rSku))
             }
-            // Удаление (списание) лишней или ушедшей в оверфлоу валюты (точно как в products_2.json -> ### DELETE ###)!
             for (negAmt in negativeDeleteAmounts) {
                 val absVal = kotlin.math.abs(negAmt)
                 val delSku = "custom.Delete.$prefix.$absVal"
@@ -824,8 +933,7 @@ object Pvz2Manager {
         return finalProductsJson to finalScheduleJson
     }
 
-    // ==================== 2. ИСПРАВЛЕННЫЙ МОД: МОМЕНТАЛЬНЫЕ РАСТЕНИЯ И ОТРИЦАТЕЛЬНАЯ ЦЕНА СОЛНЦА ====================
-    // Поддерживает отрицательную цену (например, -500 солнца даёт +500 солнца при посадке!) и отрицательный кулдаун (-999 сек = мгновенный откат)!
+    // ==================== 2. МОМЕНТАЛЬНАЯ ПЕРЕЗАРЯДКА (-999) И ОТРИЦАТЕЛЬНАЯ ЦЕНА СОЛНЦА (-500) ====================
 
     fun patchZeroSunAndInstantCooldown(
         cdnDir: String,
@@ -833,15 +941,11 @@ object Pvz2Manager {
         log: (String) -> Unit
     ): Boolean {
         val targetSunValue = if (useNegativeSunBonus) -500 else 0
-        // В движке PvZ 2 значение Cooldown = 0 сбрасывается на стандартное! А отрицательное (-999) даёт мгновенную перезарядку 0.0 сек!
         val targetCooldownValue = -999
 
-        val (_, noBackup) = resolveNoBackupDir {}
         val allCdnDirs = listAllCdnDirs().ifEmpty { listOf(cdnDir) }.toMutableSet().apply { add(cdnDir) }
-
         var patchedFilesCount = 0
 
-        // Патчим во ВСЕХ найденных папках CDN.* сразу, чтобы игра гарантированно подхватила нужный файл!
         for (dir in allCdnDirs) {
             val candidateFiles = listOf(
                 "$dir/PlantLevels.rton",
@@ -875,7 +979,6 @@ object Pvz2Manager {
     ) {
         when (node) {
             is JSONObject -> {
-                // 1. Обработка блоков FloatStats в PlantLevels.rton: {"Name": "Cost", "Values": [...]}
                 val statName = node.optString("Name", "")
                 if (statName.equals("Cost", ignoreCase = true) ||
                     statName.equals("SunCost", ignoreCase = true)
@@ -899,7 +1002,6 @@ object Pvz2Manager {
                     }
                 }
 
-                // 2. Обработка прямых свойств в PlantProperties.rton
                 val keys = node.keys().asSequence().toList()
                 for (k in keys) {
                     val v = node.opt(k)
