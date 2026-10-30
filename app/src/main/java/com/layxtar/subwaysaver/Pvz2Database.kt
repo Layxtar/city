@@ -8,13 +8,13 @@ object Pvz2Database {
     val CURRENCIES = listOf(
         "c" to "🪙 Монеты (Coins)",
         "g" to "💎 Алмазы / Кристаллы (Gems)",
-        "m" to "🌿 Мяты для Арены (Mints)",
-        "t" to "🥊 Перчатки Арены (Gauntlets)",
+        "m" to "🍬 Мяты / Конфеты Арены (Mints)",
+        "t" to "🥊 Перчатки Арены (Gauntlets / Tickets)",
         "pf" to "⛽ Топливо Погони Пенни (Penny Fuel)",
         "s" to "🌱 Ростки Сада Дзен (Sprouts)"
     )
 
-    // Полный список растений (включая Baneberry, Scorchoak / pyroak, Thornwhip, Volt Snapdragon и др.)
+    // Полный список всех 215+ растений (включая Baneberry, Scorchoak / pyroak, Thornwhip, Volt Snapdragon и др.)
     val ALL_PLANT_IDS = listOf(
         "baneberry", "pyroak", "thornwhip", "voltsnapdragon", "sakura", "blazingknight",
         "rose", "brainstem", "lemonaid", "sourshot", "devourbloom",
