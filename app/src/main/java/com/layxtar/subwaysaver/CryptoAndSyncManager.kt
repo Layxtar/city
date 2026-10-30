@@ -16,7 +16,6 @@ import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.spec.SecretKeySpec
 
-// Модель состояния отдельного сёрфера в Subway Surfers City (без ранга опыта)
 data class CitySurferState(
     val id: Long,
     val name: String,
@@ -26,7 +25,6 @@ data class CitySurferState(
     var selectedSkin: Int
 )
 
-// Модель состояния отдельной доски в Subway Surfers City
 data class CityBoardState(
     val id: Long,
     val name: String,
@@ -321,7 +319,6 @@ object CryptoAndSyncManager {
         profile.put("surferProfiles", newArray)
     }
 
-    // Чтение всех открытых костюмов (скинов) из surferSkinProfiles
     fun parseUnlockedCitySkins(profile: JSONObject): Set<Long> {
         val arr = profile.optJSONArray("surferSkinProfiles") ?: return emptySet()
         val res = mutableSetOf<Long>()
@@ -334,7 +331,6 @@ object CryptoAndSyncManager {
         return res
     }
 
-    // Сохранение индивидуально выбранных костюмов (скинов) в surferSkinProfiles
     fun applyUnlockedCitySkins(profile: JSONObject, unlockedSkinIds: Set<Long>) {
         val skinsArray = JSONArray()
         val defaultSkins = GameDatabase.SURFER_SKINS_MAP.values.mapNotNull { it.firstOrNull()?.dataTag }.toSet()
@@ -382,7 +378,6 @@ object CryptoAndSyncManager {
         profile.put("boardProfiles", newArray)
     }
 
-    // Разблокирует и прокачивает всех сёрферов до 20 ур. без накрутки их пробега
     fun unlockAndMaxAllSurfers(profile: JSONObject) {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
         val existingSkins = mutableMapOf<Long, Int>()
@@ -429,41 +424,189 @@ object CryptoAndSyncManager {
         profile.put("avatarProfiles", avatarsArray)
     }
 
+    // ==================== УПРАВЛЕНИЕ РАЙОНАМИ (ТРАССАМИ 1..6) И ТРИАЛАМИ ПО ВЫБОРУ ====================
+
     fun completeAllDistrictsAndStages(profile: JSONObject) {
-        val distProf = JSONArray()
-        val campDistProf = JSONArray()
-        for (dId in GameDatabase.DISTRICTS) {
-            distProf.put(JSONObject().put("id", dId).put("isUnlocked", true).put("wasSeen", true))
-            campDistProf.put(JSONObject().put("id", dId).put("isUnlocked", true))
-        }
         for (num in 1..6) {
-            distProf.put(JSONObject().put("id", num).put("isUnlocked", true).put("wasSeen", true))
+            setCityDistrictUnlocked(profile, num, true)
         }
-        profile.put("districtProfiles", distProf)
-        profile.put("campaignDistrictProfiles", campDistProf)
+    }
+
+    fun lockAllExtraDistricts(profile: JSONObject) {
+        setCityDistrictUnlocked(profile, 1, true)
+        for (dNum in 2..6) {
+            setCityDistrictUnlocked(profile, dNum, false)
+        }
+    }
+
+    fun isCityDistrictUnlocked(profile: JSONObject, districtNum: Int): Boolean {
+        val dKey = "district_$districtNum"
+        val distProf = profile.optJSONArray("districtProfiles") ?: return (districtNum == 1)
+        for (i in 0 until distProf.length()) {
+            val obj = distProf.optJSONObject(i) ?: continue
+            val idVal = obj.opt("id")
+            if ((idVal is String && idVal == dKey) || (idVal is Number && idVal.toInt() == districtNum)) {
+                return obj.optBoolean("isUnlocked", false)
+            }
+        }
+        return districtNum == 1
+    }
+
+    fun setCityDistrictUnlocked(profile: JSONObject, districtNum: Int, unlocked: Boolean) {
+        val dKey = "district_$districtNum"
+        val stageCounts = mapOf(1 to 32, 2 to 36, 3 to 36, 4 to 36, 5 to 36, 6 to 20)
+        val maxStage = stageCounts[districtNum] ?: 36
+
+        val distProf = profile.optJSONArray("districtProfiles") ?: JSONArray()
+        val newDistProf = JSONArray()
+        var foundStr = false
+        var foundNum = false
+
+        for (i in 0 until distProf.length()) {
+            val obj = distProf.optJSONObject(i) ?: continue
+            val idVal = obj.opt("id")
+            if (idVal is String && idVal == dKey) {
+                foundStr = true
+                if (unlocked || districtNum == 1) {
+                    newDistProf.put(JSONObject().put("id", dKey).put("isUnlocked", true).put("wasSeen", true))
+                }
+            } else if (idVal is Number && idVal.toInt() == districtNum) {
+                foundNum = true
+                if (unlocked || districtNum == 1) {
+                    newDistProf.put(JSONObject().put("id", districtNum).put("isUnlocked", true).put("wasSeen", true))
+                }
+            } else {
+                newDistProf.put(obj)
+            }
+        }
+        if (unlocked || districtNum == 1) {
+            if (!foundStr) newDistProf.put(JSONObject().put("id", dKey).put("isUnlocked", true).put("wasSeen", true))
+            if (!foundNum) newDistProf.put(JSONObject().put("id", districtNum).put("isUnlocked", true).put("wasSeen", true))
+        }
+        profile.put("districtProfiles", newDistProf)
+
+        val campProf = profile.optJSONArray("campaignDistrictProfiles") ?: JSONArray()
+        val newCampProf = JSONArray()
+        var foundCamp = false
+        for (i in 0 until campProf.length()) {
+            val obj = campProf.optJSONObject(i) ?: continue
+            if (obj.optString("id") == dKey) {
+                foundCamp = true
+                if (unlocked || districtNum == 1) {
+                    newCampProf.put(JSONObject().put("id", dKey).put("isUnlocked", true))
+                }
+            } else {
+                newCampProf.put(obj)
+            }
+        }
+        if ((unlocked || districtNum == 1) && !foundCamp) {
+            newCampProf.put(JSONObject().put("id", dKey).put("isUnlocked", true))
+        }
+        profile.put("campaignDistrictProfiles", newCampProf)
 
         val goals = profile.optJSONArray("goals") ?: JSONArray()
+        val prefix = "district${districtNum}_stage"
+        val filteredGoals = JSONArray()
         val existingGoalIds = mutableSetOf<String>()
+
         for (i in 0 until goals.length()) {
-            val g = goals.getJSONObject(i)
-            g.put("completed", true)
-            existingGoalIds.add(g.getString("id"))
+            val g = goals.optJSONObject(i) ?: continue
+            val gId = g.optString("id", "")
+            if (gId.startsWith(prefix)) {
+                if (unlocked) {
+                    g.put("completed", true)
+                    filteredGoals.put(g)
+                    existingGoalIds.add(gId)
+                }
+            } else {
+                filteredGoals.put(g)
+            }
         }
-        val stageCounts = mapOf(1 to 32, 2 to 36, 3 to 36, 4 to 36, 5 to 36, 6 to 20)
-        for ((districtNum, maxStage) in stageCounts) {
+
+        if (unlocked) {
             for (stage in 1..maxStage) {
                 for (goal in 1..3) {
                     val gId = "district${districtNum}_stage${stage}_goal$goal"
                     if (existingGoalIds.add(gId)) {
-                        goals.put(JSONObject().put("id", gId).put("completed", true))
+                        filteredGoals.put(JSONObject().put("id", gId).put("completed", true))
                     }
                 }
             }
         }
-        profile.put("goals", goals)
+        profile.put("goals", filteredGoals)
     }
 
-    // Выполнение всех активных Ежедневных и Еженедельных заданий в Subway Surfers City
+    fun isCityTrialOrCampaignCompleted(profile: JSONObject, prefixId: String): Boolean {
+        val goals = profile.optJSONArray("goals") ?: return false
+        val targetGoal = "${prefixId}_stage1_goal1"
+        for (i in 0 until goals.length()) {
+            val g = goals.optJSONObject(i) ?: continue
+            if (g.optString("id") == targetGoal && g.optBoolean("completed", false)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun setCityTrialOrCampaignCompleted(
+        profile: JSONObject,
+        prefixId: String,
+        maxStages: Int,
+        completed: Boolean,
+        setAsActiveCampaign: Boolean = false
+    ) {
+        val goals = profile.optJSONArray("goals") ?: JSONArray()
+        val searchPrefix = "${prefixId}_stage"
+        val newGoals = JSONArray()
+        val existingIds = mutableSetOf<String>()
+
+        for (i in 0 until goals.length()) {
+            val g = goals.optJSONObject(i) ?: continue
+            val gId = g.optString("id", "")
+            if (gId.startsWith(searchPrefix)) {
+                if (completed) {
+                    g.put("completed", true)
+                    newGoals.put(g)
+                    existingIds.add(gId)
+                }
+            } else {
+                newGoals.put(g)
+            }
+        }
+
+        if (completed) {
+            for (stage in 1..maxStages) {
+                for (goal in 1..3) {
+                    val gId = "${prefixId}_stage${stage}_goal$goal"
+                    if (existingIds.add(gId)) {
+                        newGoals.put(JSONObject().put("id", gId).put("completed", true))
+                    }
+                }
+            }
+        }
+        profile.put("goals", newGoals)
+
+        if (setAsActiveCampaign && completed) {
+            val activeCamp = profile.optJSONObject("activeScheduledCampaignProfile") ?: JSONObject()
+            activeCamp.put("activeScheduledCampaignId", prefixId)
+            activeCamp.put("playableSurfers", JSONArray().apply {
+                for ((sId, _) in GameDatabase.SURFERS) put(sId)
+            })
+            profile.put("activeScheduledCampaignProfile", activeCamp)
+        }
+
+        val trials = profile.optJSONArray("dailyTrials")
+        if (trials != null) {
+            for (i in 0 until trials.length()) {
+                trials.getJSONObject(i).apply {
+                    put("attempts", 0)
+                    if (!completed) put("claimedGoalRewards", 0)
+                }
+            }
+        }
+        profile.put("timers", JSONObject())
+    }
+
     fun completeAllDailyAndWeeklyMissions(profile: JSONObject) {
         val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
         for (i in 0 until missions.length()) {
@@ -564,37 +707,13 @@ object CryptoAndSyncManager {
     }
 
     fun unlockAllEventTrialsAnd3StarMissions(profile: JSONObject) {
-        val goals = profile.optJSONArray("goals") ?: JSONArray()
-        val existingGoalIds = mutableSetOf<String>()
-        for (i in 0 until goals.length()) {
-            val g = goals.getJSONObject(i)
-            g.put("completed", true)
-            existingGoalIds.add(g.optString("id"))
-        }
-
         for ((campId, _) in GameDatabase.SCHEDULED_CAMPAIGNS) {
-            for (stage in 1..7) {
-                for (goal in 1..3) {
-                    val gId = "${campId}_stage${stage}_goal$goal"
-                    if (existingGoalIds.add(gId)) {
-                        goals.put(JSONObject().put("id", gId).put("completed", true))
-                    }
-                }
-            }
+            setCityTrialOrCampaignCompleted(profile, campId, 7, true, false)
         }
-
         val trialPrefixes = listOf("trial", "daily_trial", "event_trial", "weekly_trial")
         for (prefix in trialPrefixes) {
-            for (stage in 1..5) {
-                for (goal in 1..3) {
-                    val gId = "${prefix}_stage${stage}_goal$goal"
-                    if (existingGoalIds.add(gId)) {
-                        goals.put(JSONObject().put("id", gId).put("completed", true))
-                    }
-                }
-            }
+            setCityTrialOrCampaignCompleted(profile, prefix, 5, true, false)
         }
-        profile.put("goals", goals)
 
         val activeCamp = profile.optJSONObject("activeScheduledCampaignProfile") ?: JSONObject()
         if (!activeCamp.has("activeScheduledCampaignId")) {
@@ -604,16 +723,6 @@ object CryptoAndSyncManager {
             for ((sId, _) in GameDatabase.SURFERS) put(sId)
         })
         profile.put("activeScheduledCampaignProfile", activeCamp)
-
-        val trials = profile.optJSONArray("dailyTrials")
-        if (trials != null) {
-            for (i in 0 until trials.length()) {
-                trials.getJSONObject(i).apply {
-                    put("attempts", 0)
-                    put("claimedGoalRewards", 0)
-                }
-            }
-        }
 
         profile.put("timers", JSONObject())
         profile.optJSONObject("onlinePlayerProfile")?.put("renameableAt", "0001-01-01T00:00:00")
