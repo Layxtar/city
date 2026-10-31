@@ -48,6 +48,7 @@ fun Pvz2Screen(
     var pinataMultiplier by remember { mutableStateOf("100") }
     var pinataMinSeeds by remember { mutableStateOf("1000") }
     var useNegativeSunBonus by remember { mutableStateOf(true) }
+    var translatePlantNames by remember { mutableStateOf(true) }
 
     fun loadPvz2Async() {
         if (!CryptoAndSyncManager.hasPermission()) {
@@ -88,6 +89,7 @@ fun Pvz2Screen(
                 ScrollableTabRow(selectedTabIndex = selectedTab) {
                     val tabs = listOf(
                         "🛒 Мега-Магазин (1🪙)",
+                        "🇷🇺 Русификатор",
                         "🌞 -500 Солнца & Моды",
                         "💰 Профиль pp.dat",
                         "📂 Папка CDN & Откат"
@@ -124,6 +126,7 @@ fun Pvz2Screen(
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             when (selectedTab) {
+                // ВКЛАДКА 0: МЕГА-МАГАЗИН
                 0 -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -132,14 +135,14 @@ fun Pvz2Screen(
                         Spacer(modifier = Modifier.height(6.dp))
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🛒 Полный Магазин за 1 Монету + Семена + Списание Валют + Бонусы", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("🛒 Полный Магазин за 1 Монету + Семена + Большие Валюты + Удаление", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Text(
                                     "Собирает магазин в `${activeCdnDir.substringAfterLast("/")}`:\n" +
-                                    "• Все существующие товары игры переведены в 1 монету.\n" +
-                                    "• Вкладка Plants: все 214 растений (включая Scorchoak / pyroak, Thornwhip, Volt Snapdragon) за 1 монету.\n" +
-                                    "• Вкладки Seeds / Seeds2 / Seeds3: пакеты семян по 1, 100, 10 000, 100 000 и 1 000 000 шт. с авто-клонированием таблиц лута для всех новых растений!\n" +
-                                    "• Вкладка DeleteItems: отрицательные паки (-1K .. -1B) для очистки переполненных валют.\n" +
-                                    "• Вкладка Piñatas & Bundles: супер-пиньяты All Plants XP (прокачивают все 214 растений разом!) и умножители Календаря/Квестов x200.",
+                                    "• Все дефолтные товары игры сохранены и стоят 1 монету.\n" +
+                                    "• Вкладка Resources: после обычных пакетов добавлены огромные значения (до 1 Миллиарда и MAX 2.14B) для всех валют (Монеты, Алмазы, Конфеты/Мяты, Перчатки, Топливо, Ростки, Энергия Ивентов, Короны, Ключи и Жетоны).\n" +
+                                    "• Вкладка Plants & Costumes: все 217+ растений (включая Baneberry, Belfright, Cactalog, Pyroak, Thornwhip, Volt Snapdragon) и все 342 скина.\n" +
+                                    "• Вкладки Seeds / Seeds2 / Seeds3: индивидуальные пакеты семян для каждого растения.\n" +
+                                    "• Вкладка DeleteItems: отрицательные паки (-1K .. -1B) для списания лишних валют.",
                                     fontSize = 12.sp,
                                     color = Color.Gray
                                 )
@@ -157,11 +160,11 @@ fun Pvz2Screen(
                                         }
                                     }
                                 ) {
-                                    Text("🛒 УСТАНОВИТЬ ПОЛНЫЙ МАГАЗИН (РАСТЕНИЯ + СЕМЕНА + DELETE ITEMS)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                    Text("🛒 УСТАНОВИТЬ ПОЛНЫЙ МАГАЗИН (ВСЕ ВКЛАДКИ + БОЛЬШИЕ ВАЛЮТЫ)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                 }
 
                                 Divider(modifier = Modifier.padding(vertical = 4.dp))
-                                Text("🔥 Новейшие растения с полным лутом семян во вкладке Seeds2:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF81C784))
+                                Text("🔥 Новейшие растения во вкладках Plants и Seeds2:", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF81C784))
                                 Pvz2Database.NEWEST_PLANTS_HIGHLIGHT.forEach { (id, title) ->
                                     Text("• $title (ID: $id)", fontSize = 12.sp)
                                 }
@@ -171,7 +174,64 @@ fun Pvz2Screen(
                     }
                 }
 
+                // ВКЛАДКА 1: РУСИФИКАТОР PVZ 2
                 1 -> {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("🇷🇺 Русификатор Plants vs. Zombies 2 (LawnStrings-en-us.rton)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text(
+                                    "Прошивает русский перевод главного меню, кнопок боя, Альманаха, магазина, Арены, миров и всех 217+ растений (включая новейшие Baneberry / Воронец, Belfright / Колокол Ужаса, Cactalog / Кактусовое Бревно, Scorchoak / Огненный Дуб и др.) прямо в активный файл `LawnStrings-en-us.rton` без потери новых строк обновления!",
+                                    fontSize = 12.sp,
+                                    color = Color.Gray
+                                )
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Checkbox(
+                                        checked = translatePlantNames,
+                                        onCheckedChange = { translatePlantNames = it }
+                                    )
+                                    Text("Переводить названия растений на русский язык", fontSize = 13.sp)
+                                }
+
+                                Button(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0)),
+                                    onClick = {
+                                        scope.launch {
+                                            isBusy = true
+                                            withContext(Dispatchers.IO) {
+                                                Pvz2RusLocalizer.installRussianLocalization(
+                                                    cdnDir = activeCdnDir,
+                                                    translatePlantNames = translatePlantNames,
+                                                    log = log
+                                                )
+                                            }
+                                            isBusy = false
+                                        }
+                                    }
+                                ) {
+                                    Text("🇷🇺 УСТАНОВИТЬ РУСИФИКАТОР PVZ 2", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+
+                                Divider(modifier = Modifier.padding(vertical = 4.dp))
+                                Text(
+                                    "💡 Совет: Если у тебя также есть внешний полный файл перевода `LawnStrings-ru.json`, ты можешь положить его в `/storage/emulated/0/Download/LawnStrings-ru.json` — при нажатии на кнопку выше программа автоматически объединит его со встроенным переводом и зашьёт в игру!",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF90CAF9)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(90.dp))
+                    }
+                }
+
+                // ВКЛАДКА 2: -500 СОЛНЦА И МОДЫ
+                2 -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -268,13 +328,14 @@ fun Pvz2Screen(
                     }
                 }
 
-                2 -> {
+                // ВКЛАДКА 3: ПРОФИЛЬ PP.DAT
+                3 -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Прямой редактор сохранения `pp.dat` (все 214 растений):", fontSize = 12.sp, color = Color.Gray)
+                        Text("Прямой редактор сохранения `pp.dat` (все 217 растений):", fontSize = 12.sp, color = Color.Gray)
 
                         Button(modifier = Modifier.fillMaxWidth(), onClick = {
                             Pvz2Database.CURRENCIES.forEach { (k, _) -> currencies[k] = "99999999" }
@@ -293,7 +354,7 @@ fun Pvz2Screen(
 
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🌿 Открыть все 214 растений напрямую в pp.dat", fontWeight = FontWeight.Bold)
+                                Text("🌿 Открыть все 217 растений напрямую в pp.dat", fontWeight = FontWeight.Bold)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     OutlinedTextField(
                                         value = targetPlantLevel,
@@ -326,14 +387,15 @@ fun Pvz2Screen(
                                         }
                                         isBusy = false
                                     }
-                                }) { Text("💾 Сохранить Валюты и 214 Растений в pp.dat") }
+                                }) { Text("💾 Сохранить Валюты и 217 Растений в pp.dat") }
                             }
                         }
                         Spacer(modifier = Modifier.height(90.dp))
                     }
                 }
 
-                3 -> {
+                // ВКЛАДКА 4: ПАПКА CDN И ОТКАТ
+                4 -> {
                     Column(
                         modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
