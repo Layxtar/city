@@ -54,9 +54,9 @@ fun CityScreen(
     var seasonPassPoints by remember { mutableStateOf("0") }
     var activeSeasonId by remember { mutableStateOf(GameDatabase.SEASONS.last().first) }
 
-    // Состояния сёрферов, скинов и досок
+    // Состояния сёрферов, скинов и досок (используем mutableStateListOf вместо mutableStateSetOf для 100% совместимости!)
     val surferStates = remember { mutableStateListOf<CitySurferState>() }
-    val unlockedSkinTags = remember { mutableStateSetOf<Long>() }
+    val unlockedSkinTags = remember { mutableStateListOf<Long>() }
     val boardStates = remember { mutableStateListOf<CityBoardState>() }
 
     var searchQuery by remember { mutableStateOf("") }
@@ -71,7 +71,6 @@ fun CityScreen(
     var dailyDealAmountInput by remember { mutableStateOf("9999") }
 
     fun syncStateToProfileJson(profile: JSONObject) {
-        // 1. Записываем валюты в wallet -> currencies
         val walletObj = profile.optJSONObject("wallet") ?: JSONObject()
         val currArr = walletObj.optJSONArray("currencies") ?: JSONArray()
         val mapExisting = mutableMapOf<Long, JSONObject>()
@@ -90,16 +89,14 @@ fun CityScreen(
         walletObj.put("currencies", newCurrArr)
         profile.put("wallet", walletObj)
 
-        // 2. Уровень профиля и Сезонный пропуск
         profile.put("xpLevel", (playerXpLevel.toIntOrNull() ?: 1).coerceAtLeast(1))
         profile.put("seasonPassPoints", (seasonPassPoints.toIntOrNull() ?: 0).coerceAtLeast(0))
         profile.put("activeSeasonId", activeSeasonId)
 
-        // 3. Сёрферы, костюмы и доски
         if (surferStates.isNotEmpty()) {
             CryptoAndSyncManager.applyCitySurfers(profile, surferStates)
         }
-        CryptoAndSyncManager.applyUnlockedCitySkins(profile, unlockedSkinTags)
+        CryptoAndSyncManager.applyUnlockedCitySkins(profile, unlockedSkinTags.toSet())
         if (boardStates.isNotEmpty()) {
             CryptoAndSyncManager.applyCityBoards(profile, boardStates)
         }
@@ -127,12 +124,12 @@ fun CityScreen(
         surferStates.clear()
         surferStates.addAll(CryptoAndSyncManager.parseCitySurfers(profile))
 
-        unlockedSkinTags.clear()
-        unlockedSkinTags.addAll(CryptoAndSyncManager.parseUnlockedCitySkins(profile))
-        // Базовые скины (индекс 0) всегда открыты
+        val parsedSkins = CryptoAndSyncManager.parseUnlockedCitySkins(profile).toMutableSet()
         GameDatabase.SURFER_SKINS_MAP.values.forEach { list ->
-            list.firstOrNull()?.let { unlockedSkinTags.add(it.dataTag) }
+            list.firstOrNull()?.let { parsedSkins.add(it.dataTag) }
         }
+        unlockedSkinTags.clear()
+        unlockedSkinTags.addAll(parsedSkins)
 
         boardStates.clear()
         boardStates.addAll(CryptoAndSyncManager.parseCityBoards(profile))
@@ -221,11 +218,10 @@ fun CityScreen(
     val innerProfile = innerProfileJson
     val _trig = uiTrigger
 
-    // Счётчики коллекций City
     val totalSurfers = GameDatabase.SURFERS.size
     val unlockedSurfers = surferStates.count { it.isUnlocked }
     val totalSkins = GameDatabase.ALL_SKINS.size
-    val unlockedSkins = unlockedSkinTags.size
+    val unlockedSkins = unlockedSkinTags.distinct().size
     val totalBoards = GameDatabase.BOARDS.size
     val unlockedBoards = boardStates.count { it.isUnlocked }
 
@@ -387,7 +383,6 @@ fun CityScreen(
                         ) {
                             Spacer(modifier = Modifier.height(6.dp))
 
-                            // БЛОК 1: УПРАВЛЕНИЕ РАЙОНАМИ / ТРАССАМИ (ОТКРЫТИЕ И ЗАКРЫТИЕ ДОПОЛНИТЕЛЬНЫХ ТРАСС)
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("🏙️ Управление Трассами / Районами (Districts 1–6)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -450,7 +445,7 @@ fun CityScreen(
                                             }
                                             Switch(
                                                 checked = isUnlocked,
-                                                enabled = dNum != 1, // 1-й стартовый район всегда открыт
+                                                enabled = dNum != 1,
                                                 onCheckedChange = { checked ->
                                                     pushUndo()
                                                     CryptoAndSyncManager.setCityDistrictUnlocked(innerProfile, dNum, checked)
@@ -463,7 +458,6 @@ fun CityScreen(
                                 }
                             }
 
-                            // БЛОК 2: ОТКРЫТИЕ ТРИАЛОВ, ИСПЫТАНИЙ И ТУРОВ ПО ВЫБОРУ
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("🏁 Открытие Триалов и Ивентовых Туров по выбору", fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -565,7 +559,7 @@ fun CityScreen(
                         }
                     }
 
-                    // ==================== ВКЛАДКА 2: СЁРФЕРЫ И ПОДСКИНЫ (БЕЗ НАКРУТКИ ЧУЖИХ РЕКОРДОВ) ====================
+                    // ==================== ВКЛАДКА 2: СЁРФЕРЫ И ПОДСКИНЫ ====================
                     2 -> {
                         val filteredSurfers = remember(searchQuery, surferFilter, uiTrigger) {
                             surferStates.filter { s ->
@@ -622,7 +616,9 @@ fun CityScreen(
                                             s.isUnlocked = true
                                             s.level = 20
                                         }
-                                        unlockedSkinTags.addAll(GameDatabase.ALL_SKINS)
+                                        GameDatabase.ALL_SKINS.forEach { tag ->
+                                            if (!unlockedSkinTags.contains(tag)) unlockedSkinTags.add(tag)
+                                        }
                                         CryptoAndSyncManager.unlockAllSkinsAndAvatars(innerProfile)
                                         syncStateToProfileJson(innerProfile)
                                         uiTrigger++
@@ -701,7 +697,11 @@ fun CityScreen(
                                                         pushUndo()
                                                         s.isUnlocked = true
                                                         s.level = 20
-                                                        skinsList.forEach { unlockedSkinTags.add(it.dataTag) }
+                                                        skinsList.forEach { skin ->
+                                                            if (!unlockedSkinTags.contains(skin.dataTag)) {
+                                                                unlockedSkinTags.add(skin.dataTag)
+                                                            }
+                                                        }
                                                         uiTrigger++
                                                     }
                                                 ) { Text("MAX", fontSize = 11.sp) }
@@ -737,8 +737,13 @@ fun CityScreen(
                                                                     enabled = skinIdx != 0,
                                                                     onCheckedChange = { checked ->
                                                                         pushUndo()
-                                                                        if (checked) unlockedSkinTags.add(skinInfo.dataTag)
-                                                                        else unlockedSkinTags.remove(skinInfo.dataTag)
+                                                                        if (checked) {
+                                                                            if (!unlockedSkinTags.contains(skinInfo.dataTag)) {
+                                                                                unlockedSkinTags.add(skinInfo.dataTag)
+                                                                            }
+                                                                        } else {
+                                                                            unlockedSkinTags.remove(skinInfo.dataTag)
+                                                                        }
                                                                         uiTrigger++
                                                                     }
                                                                 )
@@ -749,7 +754,9 @@ fun CityScreen(
                                                                 onClick = {
                                                                     pushUndo()
                                                                     s.isUnlocked = true
-                                                                    unlockedSkinTags.add(skinInfo.dataTag)
+                                                                    if (!unlockedSkinTags.contains(skinInfo.dataTag)) {
+                                                                        unlockedSkinTags.add(skinInfo.dataTag)
+                                                                    }
                                                                     s.selectedSkin = skinIdx
                                                                     uiTrigger++
                                                                     log("👕 Выбран костюм '${skinInfo.title}' для ${s.name}")
