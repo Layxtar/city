@@ -14,10 +14,10 @@ object Pvz2Database {
         "s" to "🌱 Ростки Сада Дзен (Sprouts)"
     )
 
-    // Полный список всех 215+ растений (включая Baneberry, Scorchoak / pyroak, Thornwhip, Volt Snapdragon и др.)
+    // Полный список всех 217+ растений (включая Baneberry, Belfright, Cactalog, Scorchoak / pyroak, Thornwhip, Volt Snapdragon и др.)
     val ALL_PLANT_IDS = listOf(
-        "baneberry", "pyroak", "thornwhip", "voltsnapdragon", "sakura", "blazingknight",
-        "rose", "brainstem", "lemonaid", "sourshot", "devourbloom",
+        "baneberry", "belfright", "cactalog", "pyroak", "thornwhip", "voltsnapdragon",
+        "sakura", "blazingknight", "rose", "brainstem", "lemonaid", "sourshot", "devourbloom",
         "seashooter", "cornfetti", "hammeruit", "sweetheartsnare", "znakelily",
         "frostbonnet", "blazeleaf", "doomshroom", "blastspinner", "blastspinnercocoon",
         "mangofier", "aquavine", "minishroom", "guardshroom", "seashroom",
@@ -86,6 +86,8 @@ object Pvz2Database {
 
     val NEWEST_PLANTS_HIGHLIGHT = listOf(
         "baneberry" to "🫐 Baneberry (Воронец / Бейнберри)",
+        "belfright" to "🔔 Belfright (Колокол Ужаса)",
+        "cactalog" to "🌵 Cactalog (Кактусовое Бревно)",
         "pyroak" to "🔥 Scorchoak / Pyroak (Огненный дуб)",
         "thornwhip" to "🌿 Thornwhip (Шипастый кнут)",
         "voltsnapdragon" to "⚡ Volt Snapdragon (Вольт-дракон)",
