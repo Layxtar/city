@@ -5,7 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -35,148 +35,114 @@ fun CityScreen(
     val scope = rememberCoroutineScope()
     var selectedTab by remember { mutableIntStateOf(0) }
     var isBusy by remember { mutableStateOf(false) }
+    var uiTrigger by remember { mutableIntStateOf(0) }
 
+    var activePath by remember { mutableStateOf(CryptoAndSyncManager.DEFAULT_GAME_PROFILE_PATH) }
     var rawFileBytes by remember { mutableStateOf<ByteArray?>(null) }
     var containerJson by remember { mutableStateOf<JSONObject?>(null) }
-    var profileJson by remember { mutableStateOf<JSONObject?>(null) }
-    var activeProfilePath by remember { mutableStateOf(CryptoAndSyncManager.DEFAULT_GAME_PROFILE_PATH) }
-    var isLoaded by remember { mutableStateOf(false) }
+    var innerProfileJson by remember { mutableStateOf<JSONObject?>(null) }
+
     val undoStack = remember { mutableStateListOf<String>() }
 
-    val currencyStates = remember { mutableStateMapOf<Long, String>() }
-    val iapCheckedStates = remember { mutableStateMapOf<String, Boolean>() }
-    var iapFilterCategory by remember { mutableStateOf("Все") }
+    // Валюты City
+    val cityCurrencies = remember {
+        mutableStateMapOf<Long, String>().apply {
+            GameDatabase.CURRENCIES.forEach { (tag, _) -> put(tag, "0") }
+        }
+    }
+    var playerXpLevel by remember { mutableStateOf("1") }
+    var seasonPassPoints by remember { mutableStateOf("0") }
+    var activeSeasonId by remember { mutableStateOf(GameDatabase.SEASONS.last().first) }
 
-    var selectedPiggyId by remember { mutableStateOf(GameDatabase.PIGGY_BANKS.first().first) }
-    var selectedPiggyMission by remember { mutableLongStateOf(GameDatabase.PIGGY_BANKS.first().second.first) }
-    var piggyProgress by remember { mutableStateOf("0") }
-    var piggyFilled by remember { mutableStateOf(false) }
-    var piggyFreeClaim by remember { mutableStateOf(false) }
+    // Состояния сёрферов, скинов и досок
+    val surferStates = remember { mutableStateListOf<CitySurferState>() }
+    val unlockedSkinTags = remember { mutableStateSetOf<Long>() }
+    val boardStates = remember { mutableStateListOf<CityBoardState>() }
 
-    var seasonPurchased by remember { mutableStateOf(false) }
-    var seasonPoints by remember { mutableStateOf("0") }
-    var selectedSeasonId by remember { mutableStateOf(GameDatabase.SEASONS.first().first) }
-
-    var playerName by remember { mutableStateOf("") }
-    var playerTag by remember { mutableStateOf("") }
-    var playerLevel by remember { mutableStateOf("1") }
-    var playerXp by remember { mutableStateOf("0") }
-    var boostedMultiplier by remember { mutableStateOf("0") }
-
-    var selectedSurferId by remember { mutableLongStateOf(GameDatabase.SURFERS.first().first) }
-    var selectedBoardId by remember { mutableLongStateOf(GameDatabase.BOARDS.first().first) }
-    var crewSlot1 by remember { mutableLongStateOf(0L) }
-    var crewSlot2 by remember { mutableLongStateOf(0L) }
-    var crewSlot3 by remember { mutableLongStateOf(0L) }
-
-    val surfersList = remember { mutableStateListOf<CitySurferState>() }
-    val unlockedSkinTags = remember { mutableStateListOf<Long>() }
-    var expandedSurferId by remember { mutableStateOf<Long?>(null) }
-    var surferFilterMode by remember { mutableStateOf("Все") }
-
-    val boardsList = remember { mutableStateListOf<CityBoardState>() }
     var searchQuery by remember { mutableStateOf("") }
+    var surferFilter by remember { mutableStateOf("Все") }
+    var boardFilter by remember { mutableStateOf("Все") }
+    var expandedSurferId by remember { mutableStateOf<Long?>(null) }
 
-    fun applyUIToProfile(prof: JSONObject) {
-        val wallet = JSONArray()
-        for ((tag, _) in GameDatabase.CURRENCIES) {
-            val count = currencyStates[tag]?.toLongOrNull() ?: 0L
-            wallet.put(JSONObject().put("dataTag", tag).put("count", count))
+    // Копилка и магазин
+    var selectedPiggyIndex by remember { mutableIntStateOf(2) }
+    var piggyProgressInput by remember { mutableStateOf("250000") }
+    var piggyFilled by remember { mutableStateOf(true) }
+    var dailyDealAmountInput by remember { mutableStateOf("9999") }
+
+    fun syncStateToProfileJson(profile: JSONObject) {
+        // 1. Записываем валюты в wallet -> currencies
+        val walletObj = profile.optJSONObject("wallet") ?: JSONObject()
+        val currArr = walletObj.optJSONArray("currencies") ?: JSONArray()
+        val mapExisting = mutableMapOf<Long, JSONObject>()
+        for (i in 0 until currArr.length()) {
+            val c = currArr.getJSONObject(i)
+            mapExisting[c.getLong("id")] = c
         }
-        prof.put("wallet", wallet)
-
-        val onlineProf = prof.optJSONObject("onlinePlayerProfile") ?: JSONObject()
-        if (playerName.isNotBlank()) onlineProf.put("name", playerName)
-        if (playerTag.isNotBlank()) onlineProf.put("tag", playerTag)
-        onlineProf.put("renameableAt", "0001-01-01T00:00:00")
-        prof.put("onlinePlayerProfile", onlineProf)
-
-        prof.put("level", playerLevel.toIntOrNull() ?: prof.optInt("level", 1))
-        prof.put("xp", playerXp.toIntOrNull() ?: prof.optInt("xp", 0))
-
-        val bm = boostedMultiplier.toIntOrNull() ?: 0
-        if (bm > 0 || prof.has("boostedRunMultiplier")) {
-            prof.put("boostedRunMultiplier", JSONObject().put("runMultiplier", bm))
+        for ((tag, strVal) in cityCurrencies) {
+            val amount = strVal.toLongOrNull() ?: 0L
+            val cObj = mapExisting[tag] ?: JSONObject().put("id", tag)
+            cObj.put("amount", amount)
+            mapExisting[tag] = cObj
         }
+        val newCurrArr = JSONArray()
+        mapExisting.values.forEach { newCurrArr.put(it) }
+        walletObj.put("currencies", newCurrArr)
+        profile.put("wallet", walletObj)
 
-        prof.put("character", selectedSurferId)
-        prof.put("selectedBoard", selectedBoardId)
+        // 2. Уровень профиля и Сезонный пропуск
+        profile.put("xpLevel", (playerXpLevel.toIntOrNull() ?: 1).coerceAtLeast(1))
+        profile.put("seasonPassPoints", (seasonPassPoints.toIntOrNull() ?: 0).coerceAtLeast(0))
+        profile.put("activeSeasonId", activeSeasonId)
 
-        if (crewSlot1 != 0L || crewSlot2 != 0L || crewSlot3 != 0L) {
-            val crewArr = JSONArray()
-            if (crewSlot1 != 0L) crewArr.put(JSONObject().put("SurferId", crewSlot1))
-            if (crewSlot2 != 0L) crewArr.put(JSONObject().put("SurferId", crewSlot2))
-            if (crewSlot3 != 0L) crewArr.put(JSONObject().put("SurferId", crewSlot3))
-            prof.put("crew", crewArr)
+        // 3. Сёрферы, костюмы и доски
+        if (surferStates.isNotEmpty()) {
+            CryptoAndSyncManager.applyCitySurfers(profile, surferStates)
         }
-
-        prof.put("seasonPassPurchased", seasonPurchased)
-        prof.put("seasonPassPoints", seasonPoints.toIntOrNull() ?: prof.optInt("seasonPassPoints", 0))
-        if (selectedSeasonId.isNotBlank()) prof.put("seasonPassId", selectedSeasonId)
-        if (seasonPurchased) prof.put("hasSeenPremiumPassActivation", true)
-
-        if (surfersList.isNotEmpty()) CryptoAndSyncManager.applyCitySurfers(prof, surfersList)
-        CryptoAndSyncManager.applyUnlockedCitySkins(prof, unlockedSkinTags.toSet())
-        if (boardsList.isNotEmpty()) CryptoAndSyncManager.applyCityBoards(prof, boardsList)
+        CryptoAndSyncManager.applyUnlockedCitySkins(profile, unlockedSkinTags)
+        if (boardStates.isNotEmpty()) {
+            CryptoAndSyncManager.applyCityBoards(profile, boardStates)
+        }
     }
 
-    fun refreshUIFromProfile(prof: JSONObject) {
-        val wallet = prof.optJSONArray("wallet") ?: JSONArray()
-        for ((tag, _) in GameDatabase.CURRENCIES) currencyStates[tag] = "0"
-        for (i in 0 until wallet.length()) {
-            val item = wallet.getJSONObject(i)
-            currencyStates[item.getLong("dataTag")] = item.getLong("count").toString()
+    fun refreshUIFromProfileJson(profile: JSONObject) {
+        val walletObj = profile.optJSONObject("wallet")
+        val currArr = walletObj?.optJSONArray("currencies")
+        val mapCurr = mutableMapOf<Long, Long>()
+        if (currArr != null) {
+            for (i in 0 until currArr.length()) {
+                val c = currArr.getJSONObject(i)
+                mapCurr[c.getLong("id")] = c.optLong("amount", 0L)
+            }
+        }
+        GameDatabase.CURRENCIES.forEach { (tag, _) ->
+            cityCurrencies[tag] = (mapCurr[tag] ?: 0L).toString()
         }
 
-        val purchases = prof.optJSONObject("purchaseHistory") ?: JSONObject()
-        for ((pId, _) in GameDatabase.IAP_CATALOG) iapCheckedStates[pId] = purchases.has(pId)
+        playerXpLevel = profile.optInt("xpLevel", 1).toString()
+        seasonPassPoints = profile.optInt("seasonPassPoints", 0).toString()
+        val curSeason = profile.optString("activeSeasonId", "")
+        if (curSeason.isNotEmpty()) activeSeasonId = curSeason
 
-        val online = prof.optJSONObject("onlinePlayerProfile")
-        playerName = online?.optString("name", "") ?: ""
-        playerTag = online?.optString("tag", "") ?: ""
-
-        playerLevel = prof.optInt("level", 1).toString()
-        playerXp = prof.optInt("xp", 0).toString()
-        boostedMultiplier = prof.optJSONObject("boostedRunMultiplier")?.optInt("runMultiplier", 0)?.toString() ?: "0"
-
-        selectedSurferId = prof.optLong("character", GameDatabase.SURFERS.first().first)
-        selectedBoardId = prof.optLong("selectedBoard", GameDatabase.BOARDS.first().first)
-
-        val crewArr = prof.optJSONArray("crew")
-        if (crewArr != null) {
-            if (crewArr.length() > 0) crewSlot1 = crewArr.getJSONObject(0).optLong("SurferId", 0L)
-            if (crewArr.length() > 1) crewSlot2 = crewArr.getJSONObject(1).optLong("SurferId", 0L)
-            if (crewArr.length() > 2) crewSlot3 = crewArr.getJSONObject(2).optLong("SurferId", 0L)
-        }
-
-        val piggy = prof.optJSONObject("piggyBank")
-        if (piggy != null) {
-            val curId = piggy.optString("currentId", GameDatabase.PIGGY_BANKS.first().first)
-            selectedPiggyId = curId
-            selectedPiggyMission = GameDatabase.PIGGY_BANKS.find { it.first == curId }?.second?.first
-                ?: GameDatabase.PIGGY_BANKS.first().second.first
-            piggyProgress = piggy.optInt("lastSeenProgress", 0).toString()
-            piggyFilled = piggy.optBoolean("isFilled", false)
-            piggyFreeClaim = purchases.has(curId)
-        }
-
-        seasonPurchased = prof.optBoolean("seasonPassPurchased", false)
-        seasonPoints = prof.optInt("seasonPassPoints", 0).toString()
-        selectedSeasonId = prof.optString("seasonPassId", GameDatabase.SEASONS.first().first)
-
-        surfersList.clear()
-        surfersList.addAll(CryptoAndSyncManager.parseCitySurfers(prof))
+        surferStates.clear()
+        surferStates.addAll(CryptoAndSyncManager.parseCitySurfers(profile))
 
         unlockedSkinTags.clear()
-        unlockedSkinTags.addAll(CryptoAndSyncManager.parseUnlockedCitySkins(prof))
+        unlockedSkinTags.addAll(CryptoAndSyncManager.parseUnlockedCitySkins(profile))
+        // Базовые скины (индекс 0) всегда открыты
+        GameDatabase.SURFER_SKINS_MAP.values.forEach { list ->
+            list.firstOrNull()?.let { unlockedSkinTags.add(it.dataTag) }
+        }
 
-        boardsList.clear()
-        boardsList.addAll(CryptoAndSyncManager.parseCityBoards(prof))
+        boardStates.clear()
+        boardStates.addAll(CryptoAndSyncManager.parseCityBoards(profile))
+
+        uiTrigger++
     }
 
     fun pushUndo() {
-        val prof = profileJson ?: return
-        applyUIToProfile(prof)
+        val prof = innerProfileJson ?: return
+        syncStateToProfileJson(prof)
         if (undoStack.size >= 20) undoStack.removeAt(0)
         undoStack.add(prof.toString())
     }
@@ -185,78 +151,83 @@ fun CityScreen(
         if (undoStack.isEmpty()) return
         val prevStr = undoStack.removeAt(undoStack.lastIndex)
         val restored = JSONObject(prevStr)
-        profileJson = restored
-        refreshUIFromProfile(restored)
-        log("↩️ Шаг назад выполнен (осталось в истории: ${undoStack.size})")
+        innerProfileJson = restored
+        refreshUIFromProfileJson(restored)
+        log("↩️ Шаг назад выполнен в City")
     }
 
-    fun loadCityAsync() {
+    fun loadCityProfileAsync() {
         if (!CryptoAndSyncManager.hasPermission()) {
             CryptoAndSyncManager.requestPermissionOrOpenShizuku(activity, log)
             return
         }
         scope.launch {
             isBusy = true
-            log("⏳ Чтение профиля Subway Surfers City...")
-            val loaded = withContext(Dispatchers.IO) {
-                CryptoAndSyncManager.stopGameForSync(CryptoAndSyncManager.PKG_CITY, false) {}
-                val path = CryptoAndSyncManager.resolveCityProfilePath {}
-                val bytes = CryptoAndSyncManager.readFileViaShizuku(path) {}
+            log("⏳ Поиск и расшифровка профиля Subway Surfers City...")
+            val result = withContext(Dispatchers.IO) {
+                CryptoAndSyncManager.stopGameForSync(CryptoAndSyncManager.PKG_CITY, false, log)
+                val resolved = CryptoAndSyncManager.resolveCityProfilePath(log)
+                val bytes = CryptoAndSyncManager.readFileViaShizuku(resolved, log)
                 if (bytes != null) {
-                    runCatching {
-                        val (cont, prof) = CryptoAndSyncManager.decryptCityProfile(bytes)
-                        Triple(path, bytes, cont to prof)
-                    }.getOrNull()
+                    val (cont, inner) = CryptoAndSyncManager.decryptCityProfile(bytes)
+                    Triple(resolved, bytes, cont to inner)
                 } else null
             }
-            if (loaded != null) {
-                activeProfilePath = loaded.first
-                rawFileBytes = loaded.second
-                containerJson = loaded.third.first
-                profileJson = loaded.third.second
+            if (result != null) {
+                activePath = result.first
+                rawFileBytes = result.second
+                containerJson = result.third.first
+                innerProfileJson = result.third.second
                 undoStack.clear()
-                refreshUIFromProfile(loaded.third.second)
-                isLoaded = true
-                log("✅ Профиль City загружен (Игрок: $playerName, Ур: $playerLevel)!")
+                refreshUIFromProfileJson(result.third.second)
+                log("✅ Профиль City успешно загружен! (Монет: ${cityCurrencies[-633437229L]}, Ключей: ${cityCurrencies[-2008679869L]})")
             } else {
-                log("❌ Профиль Subway Surfers City не найден.")
+                log("❌ Не удалось прочитать профиль City ($activePath)")
             }
             isBusy = false
         }
     }
 
-    fun saveCityAsync(launchAfterSave: Boolean) {
-        val prof = profileJson ?: return
-        val cont = containerJson ?: return
+    fun saveCityProfileAsync(launchAfter: Boolean) {
         val raw = rawFileBytes ?: return
+        val cont = containerJson ?: return
+        val prof = innerProfileJson ?: return
+        syncStateToProfileJson(prof)
 
-        applyUIToProfile(prof)
         scope.launch {
             isBusy = true
-            log("💾 Шифрование и сохранение профиля City...")
-            val newBytes = withContext(Dispatchers.IO) {
-                CryptoAndSyncManager.stopGameForSync(CryptoAndSyncManager.PKG_CITY, true) {}
-                val enc = CryptoAndSyncManager.encryptCityProfile(raw, cont, prof)
-                val ok = CryptoAndSyncManager.writeFileViaShizuku(activeProfilePath, enc) {}
-                if (ok) enc else null
+            log("💾 Шифрование AES-CTR и запись профиля City...")
+            val ok = withContext(Dispatchers.IO) {
+                CryptoAndSyncManager.stopGameForSync(CryptoAndSyncManager.PKG_CITY, true, log)
+                val encryptedBytes = CryptoAndSyncManager.encryptCityProfile(raw, cont, prof)
+                CryptoAndSyncManager.writeFileViaShizuku(activePath, encryptedBytes, log)
             }
-            if (newBytes != null) {
-                rawFileBytes = newBytes
-                log("✅ Профиль Subway City успешно сохранён!")
-                if (launchAfterSave) CryptoAndSyncManager.launchGame(activity, CryptoAndSyncManager.PKG_CITY, log)
+            if (ok) {
+                log("✅ Профиль City успешно сохранён!")
+                if (launchAfter) {
+                    CryptoAndSyncManager.launchGame(activity, CryptoAndSyncManager.PKG_CITY, log)
+                }
             } else {
-                log("❌ Ошибка сохранения профиля City!")
+                log("❌ Ошибка записи профиля City!")
             }
             isBusy = false
         }
     }
 
     LaunchedEffect(Unit) {
-        loadCityAsync()
+        loadCityProfileAsync()
     }
 
-    val unlockedSurfersCount = surfersList.count { it.isUnlocked }
-    val unlockedBoardsCount = boardsList.count { it.isUnlocked }
+    val innerProfile = innerProfileJson
+    val _trig = uiTrigger
+
+    // Счётчики коллекций City
+    val totalSurfers = GameDatabase.SURFERS.size
+    val unlockedSurfers = surferStates.count { it.isUnlocked }
+    val totalSkins = GameDatabase.ALL_SKINS.size
+    val unlockedSkins = unlockedSkinTags.size
+    val totalBoards = GameDatabase.BOARDS.size
+    val unlockedBoards = boardStates.count { it.isUnlocked }
 
     Scaffold(
         topBar = {
@@ -264,21 +235,21 @@ fun CityScreen(
                 if (isBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 ScrollableTabRow(selectedTabIndex = selectedTab) {
                     val tabs = listOf(
-                        "💰 Валюта",
-                        "⚡ Задания & Пропуск",
-                        "🏄 Сёрферы & Скины ($unlockedSurfersCount/${surfersList.size})",
-                        "🛹 Доски ($unlockedBoardsCount/${boardsList.size})",
+                        "💰 Валюты & Сезон",
+                        "🏙️ Трассы & Триалы",
+                        "🏄 Сёрферы ($unlockedSurfers/$totalSurfers | 👕$unlockedSkins/$totalSkins)",
+                        "🛹 Доски ($unlockedBoards/$totalBoards)",
                         "🐷 Копилка & Донат",
-                        "📊 Профиль & Бэкап"
+                        "⚙️ Бэкап & Логи"
                     )
                     tabs.forEachIndexed { idx, title ->
                         Tab(
                             selected = selectedTab == idx,
                             onClick = {
-                                profileJson?.let { applyUIToProfile(it) }
+                                innerProfileJson?.let { syncStateToProfileJson(it) }
                                 selectedTab = idx
                             },
-                            text = { Text(title) }
+                            text = { Text(title, fontSize = 12.sp) }
                         )
                     }
                 }
@@ -298,452 +269,496 @@ fun CityScreen(
                     OutlinedButton(
                         modifier = Modifier.weight(0.9f),
                         enabled = !isBusy,
-                        onClick = { loadCityAsync() }
+                        onClick = { loadCityProfileAsync() }
                     ) { Text("🔄 Чтение", fontSize = 11.sp) }
 
                     Button(
                         modifier = Modifier.weight(1f),
-                        enabled = isLoaded && !isBusy,
-                        onClick = { saveCityAsync(false) }
+                        enabled = innerProfile != null && !isBusy,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
+                        onClick = { saveCityProfileAsync(false) }
                     ) { Text("💾 Сохранить", fontSize = 11.sp) }
 
                     Button(
                         modifier = Modifier.weight(1.1f),
-                        enabled = isLoaded && !isBusy,
+                        enabled = innerProfile != null && !isBusy,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                        onClick = { saveCityAsync(true) }
+                        onClick = { saveCityProfileAsync(true) }
                     ) { Text("🚀 В City", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold) }
                 }
             }
         }
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            when (selectedTab) {
-                // ВКЛАДКА 0: ВАЛЮТА
-                0 -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Button(modifier = Modifier.weight(1f), onClick = {
-                                pushUndo()
-                                GameDatabase.CURRENCIES.forEach { (tag, _) ->
-                                    val c = currencyStates[tag]?.toLongOrNull() ?: 0L
-                                    currencyStates[tag] = (c + 100000L).toString()
-                                }
-                                log("➕ Ко всем валютам City добавлено +100 000")
-                            }) { Text("+100K ко всем") }
-
-                            Button(modifier = Modifier.weight(1f), onClick = {
-                                pushUndo()
-                                GameDatabase.CURRENCIES.forEach { (tag, _) -> currencyStates[tag] = "9999999" }
-                                log("💎 Все валюты City выставлены на 9 999 999")
-                            }) { Text("9.99M MAX") }
-                        }
-                        GameDatabase.CURRENCIES.forEach { (tag, label) ->
-                            OutlinedTextField(
-                                value = currencyStates[tag] ?: "0",
-                                onValueChange = { currencyStates[tag] = it },
-                                label = { Text(label) },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(90.dp))
-                    }
+            if (innerProfile == null) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Загрузка профиля Subway Surfers City...")
                 }
+            } else {
+                when (selectedTab) {
+                    // ==================== ВКЛАДКА 0: ВАЛЮТЫ, УРОВЕНЬ И СЕЗОН ====================
+                    0 -> {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Spacer(modifier = Modifier.height(6.dp))
 
-                // ВКЛАДКА 1: СЕЗОННЫЙ ПРОПУСК, ЗАДАНИЯ И МЕГА-ЧИТЫ
-                1 -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🎟️ Сезонный Пропуск и Задания", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(
-                                        checked = seasonPurchased,
-                                        onCheckedChange = {
-                                            pushUndo()
-                                            seasonPurchased = it
-                                            profileJson?.let { prof -> CryptoAndSyncManager.toggleSinglePurchase(prof, "premium_pass", it) }
-                                        }
-                                    )
-                                    Text("Разблокировать платный Premium Season Pass", fontWeight = FontWeight.SemiBold)
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("⚡ Быстрые пресеты профиля City", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                pushUndo()
+                                                GameDatabase.CURRENCIES.forEach { (tag, _) ->
+                                                    cityCurrencies[tag] = "9999999"
+                                                }
+                                                syncStateToProfileJson(innerProfile)
+                                                log("💎 Все валюты выставлены на 9 999 999!")
+                                            }
+                                        ) { Text("💎 Все валюты 9.9M", fontSize = 11.sp) }
+
+                                        OutlinedButton(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                pushUndo()
+                                                CryptoAndSyncManager.completeAllDailyAndWeeklyMissions(innerProfile)
+                                                refreshUIFromProfileJson(innerProfile)
+                                                log("📜 Все ежедневные и еженедельные задания выполнены!")
+                                            }
+                                        ) { Text("📜 Задания + Pass", fontSize = 11.sp) }
+                                    }
                                 }
+                            }
+
+                            GameDatabase.CURRENCIES.forEach { (tag, label) ->
                                 OutlinedTextField(
-                                    value = seasonPoints,
-                                    onValueChange = { seasonPoints = it },
-                                    label = { Text("Очки сезона (15 000 открывает все ступени наград)") },
+                                    value = cityCurrencies[tag] ?: "0",
+                                    onValueChange = { cityCurrencies[tag] = it },
+                                    label = { Text(label) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                     modifier = Modifier.fillMaxWidth()
                                 )
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Button(modifier = Modifier.weight(1f), onClick = {
-                                        pushUndo()
-                                        seasonPurchased = true
-                                        seasonPoints = "15000"
-                                        profileJson?.let { prof -> CryptoAndSyncManager.toggleSinglePurchase(prof, "premium_pass", true) }
-                                        log("🎟️ Сезонный пропуск открыт + 15 000 очков!")
-                                    }) { Text("🎟️ Открыть Пропуск") }
+                            }
 
-                                    Button(modifier = Modifier.weight(1f), onClick = {
-                                        pushUndo()
-                                        profileJson?.let { prof ->
-                                            CryptoAndSyncManager.completeAllDailyAndWeeklyMissions(prof)
-                                            refreshUIFromProfile(prof)
-                                            log("✅ Все Ежедневные и Еженедельные задания выполнены!")
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("🎟️ Уровень Аккаунта и Сезонный Пропуск", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        OutlinedTextField(
+                                            value = playerXpLevel,
+                                            onValueChange = { playerXpLevel = it },
+                                            label = { Text("Уровень XP профиля") },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        OutlinedTextField(
+                                            value = seasonPassPoints,
+                                            onValueChange = { seasonPassPoints = it },
+                                            label = { Text("Очки Season Pass") },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+
+                                    Text("Активный сезон:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    GameDatabase.SEASONS.forEach { (sId, sTitle) ->
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            RadioButton(
+                                                selected = activeSeasonId == sId,
+                                                onClick = { activeSeasonId = sId }
+                                            )
+                                            Text("$sTitle ($sId)", fontSize = 13.sp)
                                         }
-                                    }) { Text("✅ Выполнить Задания") }
-                                }
-                                Divider()
-                                GameDatabase.SEASONS.forEach { (sId, sName) ->
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        RadioButton(selected = selectedSeasonId == sId, onClick = { pushUndo(); selectedSeasonId = sId })
-                                        Text(sName, fontSize = 13.sp)
                                     }
                                 }
                             }
+                            Spacer(modifier = Modifier.height(90.dp))
+                        }
+                    }
+
+                    // ==================== ВКЛАДКА 1: ТРАССЫ (РАЙОНЫ 1..6), ТУРЫ И ТРИАЛЫ ПО ВЫБОРУ ====================
+                    1 -> {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // БЛОК 1: УПРАВЛЕНИЕ РАЙОНАМИ / ТРАССАМИ (ОТКРЫТИЕ И ЗАКРЫТИЕ ДОПОЛНИТЕЛЬНЫХ ТРАСС)
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("🏙️ Управление Трассами / Районами (Districts 1–6)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text(
+                                        "Ты можешь открыть все 6 районов на 3★ или ЗАКРЫТЬ дополнительные трассы (2–6), чтобы в забегах выпадала только стартовая локация:",
+                                        fontSize = 12.sp,
+                                        color = Color.Gray
+                                    )
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                            onClick = {
+                                                pushUndo()
+                                                CryptoAndSyncManager.completeAllDistrictsAndStages(innerProfile)
+                                                uiTrigger++
+                                                log("🏙️ Все 6 районов и все их этапы открыты на 3★!")
+                                            }
+                                        ) { Text("🔓 Открыть все 6", fontSize = 11.sp, color = Color.White) }
+
+                                        OutlinedButton(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                pushUndo()
+                                                CryptoAndSyncManager.lockAllExtraDistricts(innerProfile)
+                                                uiTrigger++
+                                                log("🔒 Дополнительные трассы (2–6) закрыты! Оставлен только Район 1.")
+                                            }
+                                        ) { Text("🔒 Закрыть доп. трассы (2–6)", fontSize = 11.sp) }
+                                    }
+
+                                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+
+                                    val districtNames = listOf(
+                                        1 to "Район 1: Стартовый (Delorean Park / Downtown)",
+                                        2 to "Район 2: Доп. трасса (Subway Docks)",
+                                        3 to "Район 3: Доп. трасса (Neon Boulevard)",
+                                        4 to "Район 4: Доп. трасса (Industrial Yard)",
+                                        5 to "Район 5: Доп. трасса (Midtown Heights)",
+                                        6 to "Район 6: Доп. трасса (Grand Central)"
+                                    )
+
+                                    districtNames.forEach { (dNum, dTitle) ->
+                                        val isUnlocked = remember(uiTrigger) {
+                                            CryptoAndSyncManager.isCityDistrictUnlocked(innerProfile, dNum)
+                                        }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(dTitle, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                                Text(
+                                                    text = if (isUnlocked) "✅ Открыта (все этапы 3★)" else "🔒 Закрыта",
+                                                    fontSize = 11.sp,
+                                                    color = if (isUnlocked) Color(0xFF81C784) else Color(0xFFE57373)
+                                                )
+                                            }
+                                            Switch(
+                                                checked = isUnlocked,
+                                                enabled = dNum != 1, // 1-й стартовый район всегда открыт
+                                                onCheckedChange = { checked ->
+                                                    pushUndo()
+                                                    CryptoAndSyncManager.setCityDistrictUnlocked(innerProfile, dNum, checked)
+                                                    uiTrigger++
+                                                    log(if (checked) "🔓 Открыта трасса: $dTitle" else "🔒 Закрыта трасса: $dTitle")
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // БЛОК 2: ОТКРЫТИЕ ТРИАЛОВ, ИСПЫТАНИЙ И ТУРОВ ПО ВЫБОРУ
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("🏁 Открытие Триалов и Ивентовых Туров по выбору", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text(
+                                        "Отмечай галочками нужные испытания (Триалы и Кампании), чтобы пройти их на 3 звезды и открыть доступ к их наградам:",
+                                        fontSize = 12.sp,
+                                        color = Color.Gray
+                                    )
+
+                                    val trialsCatalog = listOf(
+                                        Triple("daily_trial", "⏱️ Ежедневный Триал (Daily Trial — 5 этапов)", 5),
+                                        Triple("event_trial", "🔥 Ивентовый Триал (Event Trial — 5 этапов)", 5),
+                                        Triple("weekly_trial", "📅 Еженедельный Триал (Weekly Trial — 5 этапов)", 5),
+                                        Triple("trial", "🏆 Основной Триал (Standard Trial — 5 этапов)", 5),
+                                        Triple("scheduled_campaign_01", "🎪 Ивентовый Тур / Кампания 1 (7 этапов)", 7),
+                                        Triple("scheduled_campaign_02", "🎪 Ивентовый Тур / Кампания 2 (7 этапов)", 7),
+                                        Triple("scheduled_campaign_03", "🎪 Ивентовый Тур / Кампания 3 (7 этапов)", 7)
+                                    )
+
+                                    val currentActiveCamp = innerProfile.optJSONObject("activeScheduledCampaignProfile")
+                                        ?.optString("activeScheduledCampaignId", "scheduled_campaign_01") ?: "scheduled_campaign_01"
+
+                                    trialsCatalog.forEach { (prefixId, title, maxStg) ->
+                                        val isDone = remember(uiTrigger) {
+                                            CryptoAndSyncManager.isCityTrialOrCampaignCompleted(innerProfile, prefixId)
+                                        }
+                                        val isCampaign = prefixId.startsWith("scheduled_campaign")
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                Checkbox(
+                                                    checked = isDone,
+                                                    onCheckedChange = { checked ->
+                                                        pushUndo()
+                                                        CryptoAndSyncManager.setCityTrialOrCampaignCompleted(
+                                                            profile = innerProfile,
+                                                            prefixId = prefixId,
+                                                            maxStages = maxStg,
+                                                            completed = checked,
+                                                            setAsActiveCampaign = isCampaign && checked
+                                                        )
+                                                        uiTrigger++
+                                                        log(if (checked) "✅ Пройден на 3★: $title" else "⏪ Сброшен прогресс: $title")
+                                                    }
+                                                )
+                                                Text(title, fontSize = 13.sp)
+                                            }
+
+                                            if (isCampaign) {
+                                                OutlinedButton(
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                    onClick = {
+                                                        pushUndo()
+                                                        CryptoAndSyncManager.setCityTrialOrCampaignCompleted(
+                                                            profile = innerProfile,
+                                                            prefixId = prefixId,
+                                                            maxStages = maxStg,
+                                                            completed = true,
+                                                            setAsActiveCampaign = true
+                                                        )
+                                                        uiTrigger++
+                                                        log("🎪 Активным туром назначен: $prefixId")
+                                                    }
+                                                ) {
+                                                    Text(if (currentActiveCamp == prefixId) "⭐ Активен" else "Активировать", fontSize = 10.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                pushUndo()
+                                                CryptoAndSyncManager.unlockAllEventTrialsAnd3StarMissions(innerProfile)
+                                                uiTrigger++
+                                                log("🏁 Все Триалы и Ивентовые Туры пройдены на 3★, таймеры сброшены!")
+                                            }
+                                        ) { Text("🏁 Пройти все Триалы", fontSize = 11.sp) }
+
+                                        OutlinedButton(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                pushUndo()
+                                                CryptoAndSyncManager.unlockSecretStarsAchievementsAndJackpots(innerProfile)
+                                                uiTrigger++
+                                                log("⭐ Секретные звёзды на трассах, ачивки и гарант джекпотов выданы!")
+                                            }
+                                        ) { Text("⭐ Секретные Звёзды", fontSize = 11.sp) }
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(90.dp))
+                        }
+                    }
+
+                    // ==================== ВКЛАДКА 2: СЁРФЕРЫ И ПОДСКИНЫ (БЕЗ НАКРУТКИ ЧУЖИХ РЕКОРДОВ) ====================
+                    2 -> {
+                        val filteredSurfers = remember(searchQuery, surferFilter, uiTrigger) {
+                            surferStates.filter { s ->
+                                val skinsForSurfer = GameDatabase.SURFER_SKINS_MAP[s.id] ?: emptyList()
+                                val matchesSearch = searchQuery.isBlank() ||
+                                        s.name.contains(searchQuery, ignoreCase = true) ||
+                                        s.id.toString().contains(searchQuery) ||
+                                        skinsForSurfer.any { it.title.contains(searchQuery, ignoreCase = true) || it.key.contains(searchQuery, ignoreCase = true) }
+
+                                val matchesFilter = when (surferFilter) {
+                                    "Открытые" -> s.isUnlocked
+                                    "Закрытые" -> !s.isUnlocked
+                                    else -> true
+                                }
+                                matchesSearch && matchesFilter
+                            }
                         }
 
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "📊 Сёрферов: $unlockedSurfers / $totalSurfers | Костюмов (Скинов): $unlockedSkins / $totalSkins",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF81C784)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                label = { Text("🔍 Поиск сёрфера или костюма (напр. Rey Romeo, Oni One, Superstar)...") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                listOf("Все", "Открытые", "Закрытые").forEach { mode ->
+                                    FilterChip(
+                                        selected = surferFilter == mode,
+                                        onClick = { surferFilter = mode },
+                                        label = { Text(mode, fontSize = 12.sp) }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.weight(1f))
                                 Button(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
                                     onClick = {
                                         pushUndo()
-                                        profileJson?.let {
-                                            GameDatabase.CURRENCIES.forEach { (tag, _) -> currencyStates[tag] = "9999999" }
-                                            CryptoAndSyncManager.unlockAndMaxAllSurfers(it)
-                                            CryptoAndSyncManager.unlockAndMaxAllBoards(it)
-                                            CryptoAndSyncManager.unlockAllSkinsAndAvatars(it)
-                                            CryptoAndSyncManager.completeAllDistrictsAndStages(it)
-                                            CryptoAndSyncManager.injectAllPaidPassesAndDonations(it)
-                                            CryptoAndSyncManager.unlockSecretStarsAchievementsAndJackpots(it)
-                                            CryptoAndSyncManager.hackDailyDealsAndAdRewards(it)
-                                            CryptoAndSyncManager.unlockAllEventTrialsAnd3StarMissions(it)
-                                            CryptoAndSyncManager.completeAllDailyAndWeeklyMissions(it)
-                                            CryptoAndSyncManager.configurePiggyBank(it, "shop.piggybankmlp7.3", -2000200805L, 250000, true, true)
-                                            refreshUIFromProfile(it)
-                                            log("👑 РЕЖИМ БОГА АКТИВИРОВАН!")
+                                        surferStates.forEach { s ->
+                                            s.isUnlocked = true
+                                            s.level = 20
                                         }
+                                        unlockedSkinTags.addAll(GameDatabase.ALL_SKINS)
+                                        CryptoAndSyncManager.unlockAllSkinsAndAvatars(innerProfile)
+                                        syncStateToProfileJson(innerProfile)
+                                        uiTrigger++
+                                        log("🏄 Все 27 сёрферов (20 ур.), 125 костюмов и 34 аватарки открыты (без изменения рекордов)!")
                                     }
-                                ) { Text("👑 АКТИВИРОВАТЬ РЕЖИМ БОГА (ВСЁ В 1 КЛИК)", color = Color.White, fontWeight = FontWeight.Bold) }
-                                Text("Открывает всех 27 сёрферов, 29 досок, все костюмы, 6 районов на 3 звезды, триалы, задания, сезонный пропуск и бесплатную копилку.", fontSize = 12.sp, color = Color.Gray)
+                                ) { Text("👑 Открыть всех + Скины", fontSize = 11.sp) }
                             }
-                        }
-                        Spacer(modifier = Modifier.height(90.dp))
-                    }
-                }
+                            Spacer(modifier = Modifier.height(6.dp))
 
-                // ВКЛАДКА 2: СЁРФЕРЫ И ВЫБОР СКИНОВ ДЛЯ КАЖДОГО ПЕРСОНАЖА + ПОИСК ПО ПОДСКИНАМ
-                2 -> {
-                    val filteredSurfers = surfersList.filter { surfer ->
-                        val skins = GameDatabase.SURFER_SKINS_MAP[surfer.id].orEmpty()
-                        val matchesQuery = searchQuery.isBlank() ||
-                                surfer.name.contains(searchQuery, ignoreCase = true) ||
-                                skins.any { it.title.contains(searchQuery, ignoreCase = true) || it.key.contains(searchQuery, ignoreCase = true) }
-
-                        val matchesFilter = when (surferFilterMode) {
-                            "Открытые" -> surfer.isUnlocked
-                            "Закрытые" -> !surfer.isUnlocked
-                            else -> true
-                        }
-                        matchesQuery && matchesFilter
-                    }
-
-                    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            label = { Text("🔍 Поиск по имени сёрфера или названию скина (напр. Oni, Skatecrow)...") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            listOf("Все", "Открытые", "Закрытые").forEach { mode ->
-                                FilterChip(
-                                    selected = surferFilterMode == mode,
-                                    onClick = { surferFilterMode = mode },
-                                    label = { Text(mode, fontSize = 12.sp) }
-                                )
-                            }
-                            Button(
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                onClick = {
-                                    pushUndo()
-                                    profileJson?.let {
-                                        applyUIToProfile(it)
-                                        CryptoAndSyncManager.unlockAndMaxAllSurfers(it)
-                                        CryptoAndSyncManager.unlockAllSkinsAndAvatars(it)
-                                        refreshUIFromProfile(it)
-                                        log("🏄 Все 27 сёрферов (20 ур.) и все ${GameDatabase.ALL_SKINS.size} скинов открыты!")
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = PaddingValues(bottom = 90.dp)
+                            ) {
+                                items(filteredSurfers, key = { it.id }) { s ->
+                                    val skinsList = GameDatabase.SURFER_SKINS_MAP[s.id] ?: emptyList()
+                                    val ownedSkinsCount = skinsList.count { unlockedSkinTags.contains(it.dataTag) }
+                                    val isSkinSearchMatch = searchQuery.isNotBlank() && skinsList.any {
+                                        it.title.contains(searchQuery, ignoreCase = true) || it.key.contains(searchQuery, ignoreCase = true)
                                     }
-                                }
-                            ) { Text("🏄 Открыть всех + все скины", fontSize = 11.sp) }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = PaddingValues(bottom = 90.dp)
-                        ) {
-                            itemsIndexed(filteredSurfers, key = { _, item -> item.id }) { _, surfer ->
-                                val realIdx = surfersList.indexOfFirst { it.id == surfer.id }
-                                if (realIdx != -1) {
-                                    val item = surfersList[realIdx]
-                                    val surferSkins = GameDatabase.SURFER_SKINS_MAP[item.id].orEmpty()
-                                    val ownedSkinsCount = surferSkins.count { s -> s.rarity == 0 || unlockedSkinTags.contains(s.dataTag) }
-                                    val isSkinMatch = searchQuery.isNotBlank() &&
-                                            !item.name.contains(searchQuery, ignoreCase = true) &&
-                                            surferSkins.any { it.title.contains(searchQuery, ignoreCase = true) || it.key.contains(searchQuery, ignoreCase = true) }
-                                    val isExpanded = expandedSurferId == item.id || isSkinMatch
+                                    val isExpanded = expandedSurferId == s.id || isSkinSearchMatch
 
                                     Card(modifier = Modifier.fillMaxWidth()) {
-                                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text(item.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                                    Text(s.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                                     Text(
-                                                        text = if (item.isUnlocked) "✅ ОТКРЫТ | Костюмов: $ownedSkinsCount/${surferSkins.size}" else "🔒 ЗАКРЫТ | Костюмов: $ownedSkinsCount/${surferSkins.size}",
-                                                        color = if (item.isUnlocked) Color(0xFF81C784) else Color(0xFFE57373),
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 12.sp
+                                                        text = if (s.isUnlocked) "✅ Открыт • Ур. ${s.level}/20 • Скинов: $ownedSkinsCount/${skinsList.size}"
+                                                        else "🔒 Закрыт • Скинов: $ownedSkinsCount/${skinsList.size}",
+                                                        fontSize = 12.sp,
+                                                        color = if (s.isUnlocked) Color(0xFF81C784) else Color(0xFFE57373)
                                                     )
                                                 }
                                                 Switch(
-                                                    checked = item.isUnlocked,
+                                                    checked = s.isUnlocked,
                                                     onCheckedChange = { checked ->
                                                         pushUndo()
-                                                        surfersList[realIdx] = item.copy(isUnlocked = checked)
+                                                        s.isUnlocked = checked
+                                                        uiTrigger++
                                                     }
-                                                )
-                                            }
-
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                OutlinedTextField(
-                                                    value = item.level.toString(),
-                                                    onValueChange = { v ->
-                                                        val lvl = (v.toIntOrNull() ?: 1).coerceIn(1, 20)
-                                                        surfersList[realIdx] = item.copy(level = lvl, isUnlocked = true)
-                                                    },
-                                                    label = { Text("Уровень (1-20)") },
-                                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                                    modifier = Modifier.weight(0.8f)
-                                                )
-                                                OutlinedTextField(
-                                                    value = item.highScore.toString(),
-                                                    onValueChange = { v ->
-                                                        val sc = v.toLongOrNull() ?: 0L
-                                                        surfersList[realIdx] = item.copy(highScore = sc)
-                                                    },
-                                                    label = { Text("🏃 Дистанция / Рекорд") },
-                                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                                    modifier = Modifier.weight(1.2f)
                                                 )
                                             }
 
                                             Row(
                                                 modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                OutlinedButton(onClick = {
-                                                    pushUndo()
-                                                    selectedSurferId = item.id
-                                                    surfersList[realIdx] = item.copy(isUnlocked = true)
-                                                    log("🏄 Выбран: ${item.name}")
-                                                }) {
-                                                    Text(if (selectedSurferId == item.id) "⭐ Активен" else "Взять в забег", fontSize = 11.sp)
-                                                }
-
-                                                TextButton(onClick = {
-                                                    expandedSurferId = if (expandedSurferId == item.id) null else item.id
-                                                }) {
-                                                    Text(
-                                                        if (isExpanded) "🔼 Скрыть скины (${surferSkins.size})" else "👕 Выбрать скины ($ownedSkinsCount/${surferSkins.size})",
-                                                        fontSize = 12.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                }
-                                            }
-
-                                            // Раскрывающийся список костюмов (скинов) конкретного сёрфера City!
-                                            if (isExpanded && surferSkins.isNotEmpty()) {
-                                                Divider(modifier = Modifier.padding(vertical = 4.dp))
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    Text("Гардероб персонажа:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF90CAF9))
-                                                    TextButton(onClick = {
-                                                        pushUndo()
-                                                        surferSkins.forEach { sk ->
-                                                            if (!unlockedSkinTags.contains(sk.dataTag)) unlockedSkinTags.add(sk.dataTag)
-                                                        }
-                                                        surfersList[realIdx] = item.copy(isUnlocked = true)
-                                                        log("👕 Все скины для ${item.name} открыты!")
-                                                    }) {
-                                                        Text("Открыть все скины героя", fontSize = 11.sp)
-                                                    }
-                                                }
-
-                                                surferSkins.forEachIndexed { skinIdx, skinInfo ->
-                                                    val isSkinUnlocked = skinIdx == 0 || unlockedSkinTags.contains(skinInfo.dataTag)
-                                                    val isEquipped = item.selectedSkin.toLong() == skinInfo.dataTag || (item.selectedSkin == 0 && skinIdx == 0)
-
-                                                    Row(
-                                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.SpaceBetween
-                                                    ) {
-                                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                                            Checkbox(
-                                                                checked = isSkinUnlocked,
-                                                                enabled = skinIdx != 0,
-                                                                onCheckedChange = { checked ->
-                                                                    pushUndo()
-                                                                    if (checked) {
-                                                                        if (!unlockedSkinTags.contains(skinInfo.dataTag)) {
-                                                                            unlockedSkinTags.add(skinInfo.dataTag)
-                                                                        }
-                                                                        surfersList[realIdx] = item.copy(isUnlocked = true)
-                                                                    } else {
-                                                                        unlockedSkinTags.remove(skinInfo.dataTag)
-                                                                    }
-                                                                }
-                                                            )
-                                                            Column {
-                                                                Text(skinInfo.title, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                                                                Text(
-                                                                    text = "${if (isSkinUnlocked) "✅ Открыт" else "🔒 Закрыт"} • Редкость: ${skinInfo.rarity}",
-                                                                    fontSize = 11.sp,
-                                                                    color = if (isSkinUnlocked) Color(0xFF81C784) else Color.Gray
-                                                                )
-                                                            }
-                                                        }
-                                                        OutlinedButton(
-                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                                            onClick = {
-                                                                pushUndo()
-                                                                if (!unlockedSkinTags.contains(skinInfo.dataTag)) {
-                                                                    unlockedSkinTags.add(skinInfo.dataTag)
-                                                                }
-                                                                val eqVal = if (skinIdx == 0) 0 else skinInfo.dataTag.toInt()
-                                                                surfersList[realIdx] = item.copy(isUnlocked = true, selectedSkin = eqVal)
-                                                                selectedSurferId = item.id
-                                                                log("👕 Экипирован скин '${skinInfo.title}' для ${item.name}!")
-                                                            }
-                                                        ) {
-                                                            Text(if (isEquipped) "⭐ Надет" else "Надеть", fontSize = 11.sp)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ВКЛАДКА 3: ДОСКИ
-                3 -> {
-                    val filteredBoards = boardsList.filter { it.name.contains(searchQuery, ignoreCase = true) }
-                    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            label = { Text("🔍 Поиск доски City ($unlockedBoardsCount/${boardsList.size} открыто)...") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Button(modifier = Modifier.fillMaxWidth(), onClick = {
-                            pushUndo()
-                            profileJson?.let {
-                                applyUIToProfile(it)
-                                CryptoAndSyncManager.unlockAndMaxAllBoards(it)
-                                refreshUIFromProfile(it)
-                                log("🛹 Все ${boardsList.size} досок открыты и прокачаны до 20 уровня!")
-                            }
-                        }) { Text("🛹 Открыть все ${boardsList.size} досок (20 Ур.)") }
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            contentPadding = PaddingValues(bottom = 90.dp)
-                        ) {
-                            itemsIndexed(filteredBoards, key = { _, item -> item.id }) { _, board ->
-                                val realIdx = boardsList.indexOfFirst { it.id == board.id }
-                                if (realIdx != -1) {
-                                    val item = boardsList[realIdx]
-                                    Card(modifier = Modifier.fillMaxWidth()) {
-                                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(item.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                                    Text(
-                                                        text = if (item.isUnlocked) "✅ ОТКРЫТА" else "🔒 ЗАКРЫТА",
-                                                        color = if (item.isUnlocked) Color(0xFF81C784) else Color(0xFFE57373),
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 12.sp
-                                                    )
-                                                }
-                                                Switch(
-                                                    checked = item.isUnlocked,
-                                                    onCheckedChange = { checked ->
-                                                        pushUndo()
-                                                        boardsList[realIdx] = item.copy(isUnlocked = checked)
-                                                    }
-                                                )
-                                            }
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                            ) {
                                                 OutlinedTextField(
-                                                    value = item.level.toString(),
+                                                    value = s.level.toString(),
                                                     onValueChange = { v ->
-                                                        val lvl = (v.toIntOrNull() ?: 1).coerceIn(1, 20)
-                                                        boardsList[realIdx] = item.copy(level = lvl, isUnlocked = true)
+                                                        s.level = (v.toIntOrNull() ?: 1).coerceIn(1, 20)
+                                                        uiTrigger++
                                                     },
-                                                    label = { Text("Уровень доски (1-20)") },
+                                                    label = { Text("Уровень (1–20)") },
                                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                                     modifier = Modifier.weight(1f)
                                                 )
-                                                Button(onClick = {
-                                                    pushUndo()
-                                                    selectedBoardId = item.id
-                                                    boardsList[realIdx] = item.copy(isUnlocked = true)
-                                                    log("🛹 Выбрана доска: ${item.name}")
-                                                }) {
-                                                    Text(if (selectedBoardId == item.id) "⭐ Активна" else "Экипировать", fontSize = 11.sp)
+                                                OutlinedTextField(
+                                                    value = s.highScore.toString(),
+                                                    onValueChange = { v ->
+                                                        s.highScore = (v.toLongOrNull() ?: 0L).coerceAtLeast(0L)
+                                                        uiTrigger++
+                                                    },
+                                                    label = { Text("Личный рекорд") },
+                                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                                    modifier = Modifier.weight(1.2f)
+                                                )
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        pushUndo()
+                                                        s.isUnlocked = true
+                                                        s.level = 20
+                                                        skinsList.forEach { unlockedSkinTags.add(it.dataTag) }
+                                                        uiTrigger++
+                                                    }
+                                                ) { Text("MAX", fontSize = 11.sp) }
+                                            }
+
+                                            if (skinsList.isNotEmpty()) {
+                                                TextButton(
+                                                    contentPadding = PaddingValues(0.dp),
+                                                    onClick = { expandedSurferId = if (isExpanded) null else s.id }
+                                                ) {
+                                                    Text(
+                                                        if (isExpanded) "🔼 Скрыть костюмы (${skinsList.size})"
+                                                        else "🔽 Костюмы сёрфера ($ownedSkinsCount/${skinsList.size})",
+                                                        fontSize = 12.sp
+                                                    )
+                                                }
+
+                                                if (isExpanded) {
+                                                    skinsList.forEachIndexed { skinIdx, skinInfo ->
+                                                        val isSkinOwned = unlockedSkinTags.contains(skinInfo.dataTag) || skinIdx == 0
+                                                        val isEquipped = s.selectedSkin == skinIdx
+                                                        val isHighlighted = searchQuery.isNotBlank() &&
+                                                                (skinInfo.title.contains(searchQuery, ignoreCase = true) || skinInfo.key.contains(searchQuery, ignoreCase = true))
+
+                                                        Row(
+                                                            modifier = (if (isHighlighted) Modifier.background(Color(0xFF33691E)) else Modifier).fillMaxWidth(),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.SpaceBetween
+                                                        ) {
+                                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                                Checkbox(
+                                                                    checked = isSkinOwned,
+                                                                    enabled = skinIdx != 0,
+                                                                    onCheckedChange = { checked ->
+                                                                        pushUndo()
+                                                                        if (checked) unlockedSkinTags.add(skinInfo.dataTag)
+                                                                        else unlockedSkinTags.remove(skinInfo.dataTag)
+                                                                        uiTrigger++
+                                                                    }
+                                                                )
+                                                                Text(skinInfo.title, fontSize = 12.sp)
+                                                            }
+                                                            OutlinedButton(
+                                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                                onClick = {
+                                                                    pushUndo()
+                                                                    s.isUnlocked = true
+                                                                    unlockedSkinTags.add(skinInfo.dataTag)
+                                                                    s.selectedSkin = skinIdx
+                                                                    uiTrigger++
+                                                                    log("👕 Выбран костюм '${skinInfo.title}' для ${s.name}")
+                                                                }
+                                                            ) {
+                                                                Text(if (isEquipped) "⭐ Надет" else "Надеть", fontSize = 10.sp)
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -752,125 +767,284 @@ fun CityScreen(
                             }
                         }
                     }
-                }
 
-                // ВКЛАДКА 4: СВИНЬЯ-КОПИЛКА И ДОНАТ СНОВЫМИ CHAIN OFFERS
-                4 -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🐷 Единый Центр Свиньи-Копилки", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                OutlinedTextField(
-                                    value = piggyProgress,
-                                    onValueChange = { piggyProgress = it },
-                                    label = { Text("Монет внутри копилки (до 250 000)") },
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(checked = piggyFilled, onCheckedChange = { piggyFilled = it })
-                                    Text("Копилка полностью заполнена")
+                    // ==================== ВКЛАДКА 3: ДОСКИ CITY ====================
+                    3 -> {
+                        val filteredBoards = remember(searchQuery, boardFilter, uiTrigger) {
+                            boardStates.filter { b ->
+                                val matchesSearch = searchQuery.isBlank() ||
+                                        b.name.contains(searchQuery, ignoreCase = true) ||
+                                        b.id.toString().contains(searchQuery)
+                                val matchesFilter = when (boardFilter) {
+                                    "Открытые" -> b.isUnlocked
+                                    "Закрытые" -> !b.isUnlocked
+                                    else -> true
                                 }
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(checked = piggyFreeClaim, onCheckedChange = { piggyFreeClaim = it })
-                                    Text("Сделать открытие копилки БЕСПЛАТНЫМ")
-                                }
-                                GameDatabase.PIGGY_BANKS.forEach { (pId, pair) ->
-                                    val (mId, desc) = pair
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        RadioButton(selected = selectedPiggyId == pId, onClick = { selectedPiggyId = pId; selectedPiggyMission = mId })
-                                        Text(desc, fontSize = 13.sp)
-                                    }
-                                }
-                                Button(modifier = Modifier.fillMaxWidth(), onClick = {
-                                    pushUndo()
-                                    profileJson?.let {
-                                        CryptoAndSyncManager.configurePiggyBank(it, selectedPiggyId, selectedPiggyMission, piggyProgress.toIntOrNull() ?: 250000, piggyFilled, piggyFreeClaim)
-                                        refreshUIFromProfile(it)
-                                        log("🐷 Свинья-копилка настроена!")
-                                    }
-                                }) { Text("🐷 Применить настройки Свиньи-Копилки") }
+                                matchesSearch && matchesFilter
                             }
                         }
 
-                        Button(modifier = Modifier.fillMaxWidth(), onClick = {
-                            pushUndo()
-                            profileJson?.let {
-                                CryptoAndSyncManager.injectAllPaidPassesAndDonations(it)
-                                refreshUIFromProfile(it)
-                                log("💳 Весь донат и Chain Offers активированы!")
-                            }
-                        }) { Text("💳 Разблокировать ВЕСЬ Донат в 1 клик") }
+                        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "📊 Досок открыто: $unlockedBoards / $totalBoards",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF81C784)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
 
-                        GameDatabase.IAP_CATALOG.forEach { (productId, title) ->
-                            val isChecked = iapCheckedStates[productId] == true
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Checkbox(
-                                        checked = isChecked,
-                                        onCheckedChange = { checked ->
-                                            pushUndo()
-                                            iapCheckedStates[productId] = checked
-                                            profileJson?.let { CryptoAndSyncManager.toggleSinglePurchase(it, productId, checked) }
-                                        }
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                label = { Text("🔍 Поиск доски...") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                listOf("Все", "Открытые", "Закрытые").forEach { mode ->
+                                    FilterChip(
+                                        selected = boardFilter == mode,
+                                        onClick = { boardFilter = mode },
+                                        label = { Text(mode, fontSize = 12.sp) }
                                     )
-                                    Text(text = title, fontWeight = FontWeight.Medium, fontSize = 14.sp)
                                 }
+                                Spacer(modifier = Modifier.weight(1f))
+                                Button(
+                                    onClick = {
+                                        pushUndo()
+                                        boardStates.forEach { b ->
+                                            b.isUnlocked = true
+                                            b.level = 20
+                                        }
+                                        syncStateToProfileJson(innerProfile)
+                                        uiTrigger++
+                                        log("🛹 Все 29 досок открыты и прокачаны до 20 уровня!")
+                                    }
+                                ) { Text("🛹 Все 29 досок MAX", fontSize = 11.sp) }
                             }
-                        }
-                        Spacer(modifier = Modifier.height(90.dp))
-                    }
-                }
+                            Spacer(modifier = Modifier.height(6.dp))
 
-                // ВКЛАДКА 5: ПРОФИЛЬ И БЭКАП
-                5 -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("📊 Профиль Игрока (из сохранения)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                OutlinedTextField(value = playerName, onValueChange = { playerName = it }, label = { Text("Никнейм игрока") }, modifier = Modifier.fillMaxWidth())
-                                OutlinedTextField(value = playerTag, onValueChange = { playerTag = it }, label = { Text("Сетевой тег профиля (Player Tag)") }, modifier = Modifier.fillMaxWidth())
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedTextField(value = playerLevel, onValueChange = { playerLevel = it }, label = { Text("Уровень (1-50)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                                    OutlinedTextField(value = playerXp, onValueChange = { playerXp = it }, label = { Text("Опыт (XP)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                                }
-                                OutlinedTextField(value = boostedMultiplier, onValueChange = { boostedMultiplier = it }, label = { Text("Множитель буста забега") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
-                            }
-                        }
-
-                        Card(modifier = Modifier.fillMaxWidth()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("📂 Восстановление из резервной копии", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = {
-                                    scope.launch {
-                                        val ok = withContext(Dispatchers.IO) { CryptoAndSyncManager.restoreBackup(activeProfilePath, log) }
-                                        if (ok) {
-                                            loadCityAsync()
-                                            log("⏪ Резервная копия успешно восстановлена!")
-                                        } else {
-                                            log("❌ Файл резервной копии не найден.")
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                contentPadding = PaddingValues(bottom = 90.dp)
+                            ) {
+                                items(filteredBoards, key = { it.id }) { b ->
+                                    Card(modifier = Modifier.fillMaxWidth()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(b.name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                Text(
+                                                    text = if (b.isUnlocked) "✅ Открыта • Ур. ${b.level}/20" else "🔒 Закрыта",
+                                                    fontSize = 12.sp,
+                                                    color = if (b.isUnlocked) Color(0xFF81C784) else Color(0xFFE57373)
+                                                )
+                                            }
+                                            OutlinedTextField(
+                                                value = b.level.toString(),
+                                                onValueChange = { v ->
+                                                    b.level = (v.toIntOrNull() ?: 1).coerceIn(1, 20)
+                                                    uiTrigger++
+                                                },
+                                                label = { Text("Ур.") },
+                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                                modifier = Modifier.width(75.dp).padding(horizontal = 6.dp)
+                                            )
+                                            Switch(
+                                                checked = b.isUnlocked,
+                                                onCheckedChange = { checked ->
+                                                    pushUndo()
+                                                    b.isUnlocked = checked
+                                                    uiTrigger++
+                                                }
+                                            )
                                         }
                                     }
-                                }) { Text("⏪ Откатить файл на диске из .bak_editor") }
+                                }
                             }
                         }
+                    }
 
-                        Text("📜 Журнал операций:", fontWeight = FontWeight.Bold)
-                        Box(modifier = Modifier.fillMaxWidth().height(180.dp).background(Color.Black).padding(8.dp)) {
-                            Text(text = logs, color = Color.Green, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.verticalScroll(rememberScrollState()))
+                    // ==================== ВКЛАДКА 4: КОПИЛКА, ДОНАТ-ПРОПУСКА И МАГАЗИН ====================
+                    4 -> {
+                        val purchaseHistory = innerProfile.optJSONObject("purchaseHistory") ?: JSONObject()
+
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("🐷 Настройка Копилки (Piggy Bank)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    GameDatabase.PIGGY_BANKS.forEachIndexed { idx, (pId, pair) ->
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            RadioButton(
+                                                selected = selectedPiggyIndex == idx,
+                                                onClick = { selectedPiggyIndex = idx }
+                                            )
+                                            Text("${pair.second} ($pId)", fontSize = 13.sp)
+                                        }
+                                    }
+                                    OutlinedTextField(
+                                        value = piggyProgressInput,
+                                        onValueChange = { piggyProgressInput = it },
+                                        label = { Text("Накоплено в копилке") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(checked = piggyFilled, onCheckedChange = { piggyFilled = it })
+                                        Text("Копилка полностью заполнена и бесплатна к сбору", fontSize = 12.sp)
+                                    }
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            pushUndo()
+                                            val (pId, pair) = GameDatabase.PIGGY_BANKS[selectedPiggyIndex]
+                                            val amt = piggyProgressInput.toIntOrNull() ?: 250000
+                                            CryptoAndSyncManager.configurePiggyBank(
+                                                profile = innerProfile,
+                                                piggyId = pId,
+                                                missionId = pair.first,
+                                                progressAmount = amt,
+                                                isFilled = piggyFilled,
+                                                makeFreeToClaim = true
+                                            )
+                                            uiTrigger++
+                                            log("🐷 Копилка '$pId' настроена на $amt!")
+                                        }
+                                    ) { Text("🐷 Применить Копилку") }
+                                }
+                            }
+
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("🎁 Daily Deals & Награды за Рекламу", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    OutlinedTextField(
+                                        value = dailyDealAmountInput,
+                                        onValueChange = { dailyDealAmountInput = it },
+                                        label = { Text("Количество наград в слотах (напр. 9999)") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            pushUndo()
+                                            val amt = dailyDealAmountInput.toIntOrNull() ?: 9999
+                                            CryptoAndSyncManager.hackDailyDealsAndAdRewards(innerProfile, amt, null)
+                                            uiTrigger++
+                                            log("🎁 Все слоты Daily Deals и рекламных наград умножены на $amt!")
+                                        }
+                                    ) { Text("🎁 Увеличить Daily Deals и Ad Rewards") }
+                                }
+                            }
+
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("💳 Платные Пропуска и Донат-Пакеты (IAP)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                        onClick = {
+                                            pushUndo()
+                                            CryptoAndSyncManager.injectAllPaidPassesAndDonations(innerProfile)
+                                            uiTrigger++
+                                            log("💳 Все платные пропуска (Season Pass, Remove Ads и все наборы) активированы!")
+                                        }
+                                    ) { Text("💳 АКТИВИРОВАТЬ ВЕСЬ ДОНАТ И SEASON PASS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
+
+                                    Divider(modifier = Modifier.padding(vertical = 4.dp))
+                                    GameDatabase.IAP_CATALOG.forEach { (prodId, prodTitle) ->
+                                        val isOwned = remember(uiTrigger) { purchaseHistory.has(prodId) }
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Checkbox(
+                                                checked = isOwned,
+                                                onCheckedChange = { checked ->
+                                                    pushUndo()
+                                                    CryptoAndSyncManager.toggleSinglePurchase(innerProfile, prodId, checked)
+                                                    uiTrigger++
+                                                }
+                                            )
+                                            Text(prodTitle, fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(90.dp))
                         }
-                        Spacer(modifier = Modifier.height(90.dp))
+                    }
+
+                    // ==================== ВКЛАДКА 5: БЭКАП И ЛОГИ ====================
+                    5 -> {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("📂 Путь к профилю City и Бэкап", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    OutlinedTextField(
+                                        value = activePath,
+                                        onValueChange = { activePath = it },
+                                        label = { Text("Путь к файлу profile") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    OutlinedButton(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            scope.launch {
+                                                isBusy = true
+                                                val ok = withContext(Dispatchers.IO) {
+                                                    CryptoAndSyncManager.restoreBackup(activePath, log)
+                                                }
+                                                if (ok) {
+                                                    log("⏪ Бэкап .bak_editor успешно восстановлен!")
+                                                    loadCityProfileAsync()
+                                                } else {
+                                                    log("❌ Файл бэкапа .bak_editor не найден!")
+                                                }
+                                                isBusy = false
+                                            }
+                                        }
+                                    ) { Text("⏪ Восстановить профиль из бэкапа (.bak_editor)") }
+                                }
+                            }
+
+                            Text("📜 Журнал операций:", fontWeight = FontWeight.Bold)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(240.dp)
+                                    .background(Color.Black)
+                                    .padding(8.dp)
+                            ) {
+                                Text(
+                                    text = logs,
+                                    color = Color.Green,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.verticalScroll(rememberScrollState())
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(90.dp))
+                        }
                     }
                 }
             }
