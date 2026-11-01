@@ -2,7 +2,6 @@ package com.layxtar.subwaysaver
 
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,7 +21,6 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 
 @Composable
@@ -54,7 +52,6 @@ fun CityScreen(
     var seasonPassPoints by remember { mutableStateOf("0") }
     var activeSeasonId by remember { mutableStateOf(GameDatabase.SEASONS.last().first) }
 
-    // Состояния сёрферов, скинов и досок (используем mutableStateListOf вместо mutableStateSetOf для 100% совместимости!)
     val surferStates = remember { mutableStateListOf<CitySurferState>() }
     val unlockedSkinTags = remember { mutableStateListOf<Long>() }
     val boardStates = remember { mutableStateListOf<CityBoardState>() }
@@ -64,34 +61,24 @@ fun CityScreen(
     var boardFilter by remember { mutableStateOf("Все") }
     var expandedSurferId by remember { mutableStateOf<Long?>(null) }
 
-    // Копилка и магазин
     var selectedPiggyIndex by remember { mutableIntStateOf(2) }
     var piggyProgressInput by remember { mutableStateOf("250000") }
     var piggyFilled by remember { mutableStateOf(true) }
     var dailyDealAmountInput by remember { mutableStateOf("9999") }
 
+    // Безопасная синхронизация UI -> JSON без поломки структуры wallet и xp!
     fun syncStateToProfileJson(profile: JSONObject) {
-        val walletObj = profile.optJSONObject("wallet") ?: JSONObject()
-        val currArr = walletObj.optJSONArray("currencies") ?: JSONArray()
-        val mapExisting = mutableMapOf<Long, JSONObject>()
-        for (i in 0 until currArr.length()) {
-            val c = currArr.getJSONObject(i)
-            mapExisting[c.getLong("id")] = c
-        }
+        val mapToWrite = mutableMapOf<Long, Long>()
         for ((tag, strVal) in cityCurrencies) {
-            val amount = strVal.toLongOrNull() ?: 0L
-            val cObj = mapExisting[tag] ?: JSONObject().put("id", tag)
-            cObj.put("amount", amount)
-            mapExisting[tag] = cObj
+            mapToWrite[tag] = strVal.toLongOrNull() ?: 0L
         }
-        val newCurrArr = JSONArray()
-        mapExisting.values.forEach { newCurrArr.put(it) }
-        walletObj.put("currencies", newCurrArr)
-        profile.put("wallet", walletObj)
+        CryptoAndSyncManager.writeCityCurrencies(profile, mapToWrite)
 
-        profile.put("xpLevel", (playerXpLevel.toIntOrNull() ?: 1).coerceAtLeast(1))
+        CryptoAndSyncManager.writeCityXpLevel(profile, playerXpLevel.toIntOrNull() ?: 1)
         profile.put("seasonPassPoints", (seasonPassPoints.toIntOrNull() ?: 0).coerceAtLeast(0))
-        profile.put("activeSeasonId", activeSeasonId)
+        if (activeSeasonId.isNotEmpty()) {
+            profile.put("activeSeasonId", activeSeasonId)
+        }
 
         if (surferStates.isNotEmpty()) {
             CryptoAndSyncManager.applyCitySurfers(profile, surferStates)
@@ -102,21 +89,14 @@ fun CityScreen(
         }
     }
 
+    // Безопасное чтение JSON -> UI
     fun refreshUIFromProfileJson(profile: JSONObject) {
-        val walletObj = profile.optJSONObject("wallet")
-        val currArr = walletObj?.optJSONArray("currencies")
-        val mapCurr = mutableMapOf<Long, Long>()
-        if (currArr != null) {
-            for (i in 0 until currArr.length()) {
-                val c = currArr.getJSONObject(i)
-                mapCurr[c.getLong("id")] = c.optLong("amount", 0L)
-            }
-        }
+        val mapCurr = CryptoAndSyncManager.readCityCurrencies(profile)
         GameDatabase.CURRENCIES.forEach { (tag, _) ->
             cityCurrencies[tag] = (mapCurr[tag] ?: 0L).toString()
         }
 
-        playerXpLevel = profile.optInt("xpLevel", 1).toString()
+        playerXpLevel = CryptoAndSyncManager.readCityXpLevel(profile).toString()
         seasonPassPoints = profile.optInt("seasonPassPoints", 0).toString()
         val curSeason = profile.optString("activeSeasonId", "")
         if (curSeason.isNotEmpty()) activeSeasonId = curSeason
@@ -177,7 +157,7 @@ fun CityScreen(
                 innerProfileJson = result.third.second
                 undoStack.clear()
                 refreshUIFromProfileJson(result.third.second)
-                log("✅ Профиль City успешно загружен! (Монет: ${cityCurrencies[-633437229L]}, Ключей: ${cityCurrencies[-2008679869L]})")
+                log("✅ Профиль City загружен! (Монет: ${cityCurrencies[-633437229L]}, Ключей: ${cityCurrencies[-2008679869L]})")
             } else {
                 log("❌ Не удалось прочитать профиль City ($activePath)")
             }
@@ -539,7 +519,7 @@ fun CityScreen(
                                                 pushUndo()
                                                 CryptoAndSyncManager.unlockAllEventTrialsAnd3StarMissions(innerProfile)
                                                 uiTrigger++
-                                                log("🏁 Все Триалы и Ивентовые Туры пройдены на 3★, таймеры сброшены!")
+                                                log("🏁 Все Триалы и Ивентовые Туры пройдены на 3★!")
                                             }
                                         ) { Text("🏁 Пройти все Триалы", fontSize = 11.sp) }
 
