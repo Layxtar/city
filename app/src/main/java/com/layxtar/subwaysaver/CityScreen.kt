@@ -25,13 +25,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-private data class CityCurrencyEntry(
-    val keyOrTag: String,
-    val label: String,
-    val isArrayItem: Boolean,
-    val tagLong: Long = 0L
-)
-
 @Composable
 fun CityScreen(
     activity: ComponentActivity,
@@ -52,11 +45,15 @@ fun CityScreen(
 
     val undoStack = remember { mutableStateListOf<String>() }
 
-    // Состояния валют и очков пасса
-    val currencyDefinitions = remember { mutableStateListOf<CityCurrencyEntry>() }
-    val currencyValues = remember { mutableStateMapOf<String, String>() }
+    // Строго реальные ресурсы из GameDatabase.CURRENCIES (по их настоящим DataTag!)
+    val cityCurrencies = remember {
+        mutableStateMapOf<Long, String>().apply {
+            GameDatabase.CURRENCIES.forEach { (tag, _) -> put(tag, "0") }
+        }
+    }
     var seasonPassPointsInput by remember { mutableStateOf("0") }
     var dealRewardAmountInput by remember { mutableStateOf("9999") }
+    var selectedDealCurrencyTag by remember { mutableStateOf<Long?>(null) }
 
     // Состояния Сёрферов, Скинов и Досок
     var surferStates by remember { mutableStateOf<List<CitySurferState>>(emptyList()) }
@@ -75,121 +72,63 @@ fun CityScreen(
     var piggyProgressInput by remember { mutableStateOf("5000") }
     var piggyFilledToggle by remember { mutableStateOf(true) }
 
-    val knownCurrencyLabels = remember {
-        mapOf(
-            "coins" to "🪙 Монеты (coins)",
-            "gems" to "💎 Алмазы / Кристаллы (gems)",
-            "keys" to "🔑 Ключи (keys)",
-            "energy" to "⚡ Энергия (energy)",
-            "xp" to "⭐ Опыт профиля (xp)",
-            "sprayCans" to "🎨 Баллончики краски (sprayCans)",
-            "-1878560402" to "🪙 Монеты / Ресурс (-1878560402)",
-            "-1509662453" to "💎 Кристаллы / Ресурс (-1509662453)",
-            "-1085419483" to "🎨 Жетоны / Баллончики (-1085419483)",
-            "-635142441" to "🔑 Ключи / Ресурс (-635142441)",
-            "-2008679869" to "⚡ Энергия / Бустер (-2008679869)",
-            "326719861" to "🎁 Сундуки / Награда (326719861)"
-        )
-    }
+    // Чтение только реальных ресурсов из GameDatabase.CURRENCIES
+    fun readCurrenciesFromProfile(profile: JSONObject) {
+        val currArray = profile.optJSONArray("currencies")
+            ?: profile.optJSONObject("wallet")?.optJSONArray("currencies")
+            ?: JSONArray()
 
-    fun parseCurrenciesFromProfile(profile: JSONObject) {
-        currencyDefinitions.clear()
-        currencyValues.clear()
-
-        // 1. Проверяем прямые числовые поля валют в корне профиля
-        val rootCurrencyKeys = listOf("coins", "gems", "keys", "energy", "xp", "sprayCans")
-        for (key in rootCurrencyKeys) {
-            if (profile.has(key) && profile.opt(key) is Number) {
-                val label = knownCurrencyLabels[key] ?: "💰 Валюта ($key)"
-                currencyDefinitions.add(CityCurrencyEntry(key, label, isArrayItem = false))
-                currencyValues[key] = profile.optLong(key, 0L).toString()
+        val existingMap = mutableMapOf<Long, Long>()
+        for (i in 0 until currArray.length()) {
+            val item = currArray.optJSONObject(i) ?: continue
+            val id = item.optLong("id", 0L)
+            val amount = item.optLong("amount", item.optLong("value", 0L))
+            if (id != 0L) {
+                existingMap[id] = amount
             }
         }
 
-        // 2. Проверяем объект wallet / currencies
-        val currenciesNode = profile.opt("currencies") ?: profile.opt("wallet")
-        if (currenciesNode is JSONObject) {
-            val keys = currenciesNode.keys()
-            while (keys.hasNext()) {
-                val k = keys.next()
-                val v = currenciesNode.opt(k)
-                if (v is Number) {
-                    val mapKey = "obj_$k"
-                    val label = knownCurrencyLabels[k] ?: "💰 Ресурс ($k)"
-                    currencyDefinitions.add(CityCurrencyEntry(mapKey, label, isArrayItem = false))
-                    currencyValues[mapKey] = v.toLong().toString()
-                } else if (v is JSONObject && (v.has("amount") || v.has("value") || v.has("count"))) {
-                    val mapKey = "nested_$k"
-                    val label = knownCurrencyLabels[k] ?: "💰 Ресурс ($k)"
-                    val amt = v.optLong("amount", v.optLong("value", v.optLong("count", 0L)))
-                    currencyDefinitions.add(CityCurrencyEntry(mapKey, label, isArrayItem = false))
-                    currencyValues[mapKey] = amt.toString()
-                }
-            }
-        } else if (currenciesNode is JSONArray) {
-            for (i in 0 until currenciesNode.length()) {
-                val item = currenciesNode.optJSONObject(i) ?: continue
-                val idLong = item.optLong("id", item.optLong("dataTag", 0L))
-                if (idLong != 0L) {
-                    val idStr = idLong.toString()
-                    val mapKey = "arr_$idStr"
-                    val label = knownCurrencyLabels[idStr] ?: "💰 Ресурс DataTag ($idStr)"
-                    val amt = item.optLong("amount", item.optLong("value", item.optLong("count", 0L)))
-                    currencyDefinitions.add(CityCurrencyEntry(mapKey, label, isArrayItem = true, tagLong = idLong))
-                    currencyValues[mapKey] = amt.toString()
-                }
-            }
+        for ((tag, _) in GameDatabase.CURRENCIES) {
+            cityCurrencies[tag] = (existingMap[tag] ?: 0L).toString()
         }
 
         seasonPassPointsInput = profile.optInt("seasonPassPoints", 0).toString()
     }
 
+    // Запись ресурсов из GameDatabase.CURRENCIES обратно в профиль без удаления внутренних счётчиков игры
     fun applyUIToProfile(profile: JSONObject) {
-        // Сохраняем валюты обратно в JSON
-        val currenciesNode = profile.opt("currencies") ?: profile.opt("wallet")
-        for (def in currencyDefinitions) {
-            val newVal = currencyValues[def.keyOrTag]?.toLongOrNull() ?: continue
-            when {
-                def.isArrayItem && currenciesNode is JSONArray -> {
-                    for (i in 0 until currenciesNode.length()) {
-                        val item = currenciesNode.optJSONObject(i) ?: continue
-                        val idLong = item.optLong("id", item.optLong("dataTag", 0L))
-                        if (idLong == def.tagLong) {
-                            if (item.has("amount")) item.put("amount", newVal)
-                            else if (item.has("value")) item.put("value", newVal)
-                            else if (item.has("count")) item.put("count", newVal)
-                            else item.put("amount", newVal)
-                        }
-                    }
-                }
-                def.keyOrTag.startsWith("obj_") && currenciesNode is JSONObject -> {
-                    val realKey = def.keyOrTag.removePrefix("obj_")
-                    currenciesNode.put(realKey, newVal)
-                }
-                def.keyOrTag.startsWith("nested_") && currenciesNode is JSONObject -> {
-                    val realKey = def.keyOrTag.removePrefix("nested_")
-                    val sub = currenciesNode.optJSONObject(realKey)
-                    if (sub != null) {
-                        if (sub.has("amount")) sub.put("amount", newVal)
-                        else if (sub.has("value")) sub.put("value", newVal)
-                        else if (sub.has("count")) sub.put("count", newVal)
-                        else sub.put("amount", newVal)
-                    }
-                }
-                else -> {
-                    profile.put(def.keyOrTag, newVal)
-                }
+        val currArray = profile.optJSONArray("currencies") ?: JSONArray()
+        val updatedTags = mutableSetOf<Long>()
+
+        for (i in 0 until currArray.length()) {
+            val item = currArray.optJSONObject(i) ?: continue
+            val id = item.optLong("id", 0L)
+            val newValStr = cityCurrencies[id]
+            if (newValStr != null) {
+                item.put("amount", newValStr.toLongOrNull() ?: 0L)
+                updatedTags.add(id)
             }
         }
 
+        for ((tag, _) in GameDatabase.CURRENCIES) {
+            if (!updatedTags.contains(tag)) {
+                val amount = cityCurrencies[tag]?.toLongOrNull() ?: 0L
+                currArray.put(JSONObject().apply {
+                    put("id", tag)
+                    put("amount", amount)
+                })
+            }
+        }
+        profile.put("currencies", currArray)
         profile.put("seasonPassPoints", seasonPassPointsInput.toIntOrNull() ?: 0)
+
         CryptoAndSyncManager.applyCitySurfers(profile, surferStates)
         CryptoAndSyncManager.applyUnlockedCitySkins(profile, unlockedSkinIds)
         CryptoAndSyncManager.applyCityBoards(profile, boardStates)
     }
 
     fun refreshUIFromProfile(profile: JSONObject) {
-        parseCurrenciesFromProfile(profile)
+        readCurrenciesFromProfile(profile)
         surferStates = CryptoAndSyncManager.parseCitySurfers(profile)
         unlockedSkinIds = CryptoAndSyncManager.parseUnlockedCitySkins(profile)
         boardStates = CryptoAndSyncManager.parseCityBoards(profile)
@@ -244,7 +183,7 @@ fun CityScreen(
                 undoStack.clear()
                 refreshUIFromProfile(inner)
                 isLoaded = true
-                log("✅ Профиль City успешно загружен! Сёрферов в базе: ${surferStates.size}, Досок: ${boardStates.size}")
+                log("✅ Профиль City успешно загружен!")
             } else {
                 log("⚠️ Не удалось прочитать профиль City по пути: $profilePath")
             }
@@ -294,8 +233,8 @@ fun CityScreen(
                 if (isBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 ScrollableTabRow(selectedTabIndex = selectedTab) {
                     val tabs = listOf(
+                        "💰 Ресурсы & Награды",
                         "🗺️ Туры, Трассы & Триалы",
-                        "💰 Валюты & Награды",
                         "🏄 Сёрферы ($unlockedSurfersCount/${surferStates.size})",
                         "🛹 Доски ($unlockedBoardsCount/${boardStates.size})",
                         "🐷 Копилка & Донат",
@@ -358,8 +297,127 @@ fun CityScreen(
                 }
             } else {
                 when (selectedTab) {
-                    // ==================== ВКЛАДКА 0: ОТКРЫТИЕ И ВЫБОР ТУРОВ, ДОП. ТРАСС (1..6) И ТРИАЛОВ ====================
+                    // ==================== ВКЛАДКА 0: НАСТОЯЩИЕ РЕСУРСЫ ИЗ GAMEDATABASE.CURRENCIES ====================
                     0 -> {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("⚡ Быстрая Прокачка Ресурсов и Миссий", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                            onClick = {
+                                                pushUndo()
+                                                GameDatabase.CURRENCIES.forEach { (tag, _) ->
+                                                    cityCurrencies[tag] = "9999999"
+                                                }
+                                                seasonPassPointsInput = "99999"
+                                                applyUIToProfile(innerProfile)
+                                                log("💎 Все ресурсы выставлены на 9 999 999, очки Пасса = 99 999!")
+                                            }
+                                        ) { Text("💎 Все ресурсы 9.9M", fontSize = 11.sp, color = Color.White) }
+
+                                        Button(
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                pushUndo()
+                                                CryptoAndSyncManager.completeAllDailyAndWeeklyMissions(innerProfile)
+                                                refreshUIFromProfile(innerProfile)
+                                                log("📜 Все ежедневные и сезонные миссии выполнены!")
+                                            }
+                                        ) { Text("📜 Выполнить миссии", fontSize = 11.sp) }
+                                    }
+
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            pushUndo()
+                                            CryptoAndSyncManager.unlockSecretStarsAchievementsAndJackpots(innerProfile)
+                                            uiTrigger++
+                                            log("⭐ Все Секретные Звёзды собраны, достижения открыты, гарант сундуков = 9/10!")
+                                        }
+                                    ) { Text("⭐ Собрать Секретные Звёзды + Достижения + Гарант Сундуков") }
+                                }
+                            }
+
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("💰 Ресурсы и Валюты Профиля", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+
+                                    OutlinedTextField(
+                                        value = seasonPassPointsInput,
+                                        onValueChange = { seasonPassPointsInput = it },
+                                        label = { Text("🎟️ Очки Сезонного Пасса (seasonPassPoints)") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+
+                                    GameDatabase.CURRENCIES.forEach { (tag, label) ->
+                                        OutlinedTextField(
+                                            value = cityCurrencies[tag] ?: "0",
+                                            onValueChange = { cityCurrencies[tag] = it },
+                                            label = { Text(label) },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                }
+                            }
+
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("🎁 Ежедневные Предложения и Рекламные Награды", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    OutlinedTextField(
+                                        value = dealRewardAmountInput,
+                                        onValueChange = { dealRewardAmountInput = it },
+                                        label = { Text("Количество в каждом слоте") },
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+
+                                    Text("Ресурс для выдачи (или стандартный набор):", fontSize = 12.sp, color = Color.Gray)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        FilterChip(
+                                            selected = selectedDealCurrencyTag == null,
+                                            onClick = { selectedDealCurrencyTag = null },
+                                            label = { Text("Стандартный микс", fontSize = 11.sp) }
+                                        )
+                                        GameDatabase.CURRENCIES.forEach { (tag, label) ->
+                                            FilterChip(
+                                                selected = selectedDealCurrencyTag == tag,
+                                                onClick = { selectedDealCurrencyTag = tag },
+                                                label = { Text(label, fontSize = 11.sp) }
+                                            )
+                                        }
+                                    }
+
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            pushUndo()
+                                            val amt = dealRewardAmountInput.toIntOrNull() ?: 9999
+                                            CryptoAndSyncManager.hackDailyDealsAndAdRewards(innerProfile, amt, selectedDealCurrencyTag)
+                                            uiTrigger++
+                                            log("🎁 Все слоты Daily Deals и наград за рекламу выставлены по $amt шт.!")
+                                        }
+                                    ) { Text("🎁 Установить награды магазина по $dealRewardAmountInput шт.") }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(90.dp))
+                        }
+                    }
+
+                    // ==================== ВКЛАДКА 1: ОТКРЫТИЕ И ВЫБОР ТУРОВ, ДОП. ТРАСС (1..6) И ТРИАЛОВ ====================
+                    1 -> {
                         val availableTours = remember(uiTrigger) { CryptoAndSyncManager.getAllAvailableCityTours(innerProfile) }
                         val currentActiveTour = remember(uiTrigger) { CryptoAndSyncManager.getActiveCityTourId(innerProfile) }
                         val selectedDistrictNum = remember(uiTrigger) { CryptoAndSyncManager.getSelectedCityDistrict(innerProfile) }
@@ -375,7 +433,7 @@ fun CityScreen(
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("🗺️ Открытие и Выбор Туров (City Tours & Campaigns)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     Text(
-                                        "Выбери активный Тур, открой в нём все этапы на 3★ и разблокируй всех персонажей для участия в забегах:",
+                                        "Выбери активный Тур, открой в нём все этапы на 3★ и разблокируй всех персонажей для забегов:",
                                         fontSize = 12.sp,
                                         color = Color.Gray
                                     )
@@ -454,7 +512,7 @@ fun CityScreen(
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Text("🏙️ Управление Трассами / Районами (Districts 1–6)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                     Text(
-                                        "Открывай все 6 трасс, закрывай дополнительные трассы (2–6) обратно или выбирай нужные трассы вручную:",
+                                        "Открывай все 6 трасс, закрывай дополнительные трассы (2–6) обратно или переключай нужные трассы вручную:",
                                         fontSize = 12.sp,
                                         color = Color.Gray
                                     )
@@ -576,109 +634,6 @@ fun CityScreen(
                                             log("🏁 Все Триалы и Туры пройдены на 3★, таймеры попыток сброшены!")
                                         }
                                     ) { Text("🏁 Пройти все Триалы и Туры разом + Сбросить таймеры") }
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(90.dp))
-                        }
-                    }
-
-                    // ==================== ВКЛАДКА 1: ВАЛЮТЫ, МИССИИ, РЕКЛАМНЫЕ НАГРАДЫ И СЕКРЕТНЫЕ ЗВЁЗДЫ ====================
-                    1 -> {
-                        Column(
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("⚡ Быстрая Прокачка Профиля City", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Button(
-                                            modifier = Modifier.weight(1f),
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                                            onClick = {
-                                                pushUndo()
-                                                currencyDefinitions.forEach { def ->
-                                                    currencyValues[def.keyOrTag] = "9999999"
-                                                }
-                                                seasonPassPointsInput = "99999"
-                                                applyUIToProfile(innerProfile)
-                                                log("💎 Все валюты выставлены на 9 999 999, очки Сезонного Пасса = 99 999!")
-                                            }
-                                        ) { Text("💎 Все валюты 9.9M", fontSize = 11.sp, color = Color.White) }
-
-                                        Button(
-                                            modifier = Modifier.weight(1f),
-                                            onClick = {
-                                                pushUndo()
-                                                CryptoAndSyncManager.completeAllDailyAndWeeklyMissions(innerProfile)
-                                                refreshUIFromProfile(innerProfile)
-                                                log("📜 Все ежедневные и сезонные миссии выполнены и готовы к сбору!")
-                                            }
-                                        ) { Text("📜 Выполнить миссии", fontSize = 11.sp) }
-                                    }
-
-                                    Button(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        onClick = {
-                                            pushUndo()
-                                            CryptoAndSyncManager.unlockSecretStarsAchievementsAndJackpots(innerProfile)
-                                            uiTrigger++
-                                            log("⭐ Все Секретные Звёзды на трассах собраны, достижения открыты, гарант сундуков = 9/10!")
-                                        }
-                                    ) { Text("⭐ Собрать Секретные Звёзды + Достижения + Гарант Сундуков") }
-                                }
-                            }
-
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("💰 Редактор Валют и Сезонного Пасса", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-
-                                    OutlinedTextField(
-                                        value = seasonPassPointsInput,
-                                        onValueChange = { seasonPassPointsInput = it },
-                                        label = { Text("🎟️ Очки Сезонного Пасса (seasonPassPoints)") },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-
-                                    if (currencyDefinitions.isEmpty()) {
-                                        Text("Дополнительные поля валют появятся после загрузки профиля.", fontSize = 12.sp, color = Color.Gray)
-                                    } else {
-                                        currencyDefinitions.forEach { def ->
-                                            OutlinedTextField(
-                                                value = currencyValues[def.keyOrTag] ?: "0",
-                                                onValueChange = { currencyValues[def.keyOrTag] = it },
-                                                label = { Text(def.label) },
-                                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                                modifier = Modifier.fillMaxWidth()
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("🎁 Взлом Ежедневных Предложений и Рекламных Наград", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    OutlinedTextField(
-                                        value = dealRewardAmountInput,
-                                        onValueChange = { dealRewardAmountInput = it },
-                                        label = { Text("Количество наград в каждом слоте") },
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                    Button(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        onClick = {
-                                            pushUndo()
-                                            val amt = dealRewardAmountInput.toIntOrNull() ?: 9999
-                                            CryptoAndSyncManager.hackDailyDealsAndAdRewards(innerProfile, amt, null)
-                                            uiTrigger++
-                                            log("🎁 Все слоты Daily Deals и наград за рекламу выставлены по $amt шт.!")
-                                        }
-                                    ) { Text("🎁 Установить награды магазина по $dealRewardAmountInput шт.") }
                                 }
                             }
                             Spacer(modifier = Modifier.height(90.dp))
