@@ -13,9 +13,6 @@ data class ActiveChallengeInfo(
     val title: String,
     val currentScore: Long,
     val maxScoreRequired: Long,
-    val currentStage: Int,
-    val maxStages: Int,
-    val hasStages: Boolean,
     val targetCity: String
 )
 
@@ -84,12 +81,6 @@ object ClassicCryptoAndSyncManager {
         "characters_inventory.json" to 3, "upgrades.json" to 2, "achievements.json" to 1,
         "quests.json" to 1, "city_tour.json" to 1, "missions.json" to 1, "trophies.json" to 1,
         "profile_portrait.json" to 1, "profile_frame.json" to 1
-    )
-
-    private val STAGE_FIELD_NAMES = listOf(
-        "currentStage", "stage", "currentStageIndex", "stageIndex",
-        "unlockedStage", "lastUnlockedStage", "completedStages",
-        "currentTier", "tier", "unlockedTier"
     )
 
     fun decryptBase64Data(base64Data: String): String {
@@ -233,8 +224,6 @@ object ClassicCryptoAndSyncManager {
         wallet.put("currencies", currencies)
     }
 
-    // ==================== ЖЕТОНЫ ЛЕТУЧИХ МЫШЕК (SEASON HUNT TOKENS) ====================
-
     fun getSeasonHuntBatTokens(state: ClassicMemoryState): Long {
         val walletVal = state.wallet.optJSONObject("currencies")?.optJSONObject("12")?.optLong("value", 0L) ?: 0L
         val shVal = state.seasonHunt.optLong("tokensCollected", state.seasonHunt.optLong("collectedTokens", 0L))
@@ -266,6 +255,7 @@ object ClassicCryptoAndSyncManager {
             if (sub.has("collectedTokens")) sub.put("collectedTokens", amount)
             if (sub.has("points")) sub.put("points", amount)
             if (sub.has("currentPoints")) sub.put("currentPoints", amount)
+            if (sub.has("unlockedTier")) sub.put("unlockedTier", 40)
         }
     }
 
@@ -322,152 +312,33 @@ object ClassicCryptoAndSyncManager {
         state.stats.put("userStatCollection", statsCol)
     }
 
-    // ==================== АВТО-ОПРЕДЕЛЕНИЕ ЭТАПОВ, РУЧНОЕ РЕДАКТИРОВАНИЕ И ПОЧИНКА ВКЛАДКИ СОБЫТИЙ ====================
-
-    // Определяет, сколько максимум этапов (1..5) реально существует у данного испытания
-    private fun detectMaxStagesForChallenge(key: String, ch: JSONObject): Pair<Int, Boolean> {
-        // 1. Проверяем прямые массивы этапов внутри объекта испытания
-        val stagesArr = ch.optJSONArray("stages") ?: ch.optJSONArray("stageStates") ?: ch.optJSONArray("tiers")
-        if (stagesArr != null && stagesArr.length() > 0) {
-            return stagesArr.length().coerceIn(1, 5) to (stagesArr.length() > 1)
-        }
-
-        // 2. Проверяем по названию режима и структуре rewardStates
-        val rStates = ch.optJSONArray("rewardStates")
-        val rLen = rStates?.length() ?: 0
-        val lowKey = key.lowercase()
-
-        // Марафон, Daily Highscore и короткие забеги не делятся на этапы (всего 1 этап)
-        if (lowKey.contains("marathon") || lowKey.contains("daily") || lowKey.contains("one_stage")) {
-            return 1 to false
-        }
-
-        // Tag Time Attack, Floor Is Lava, Mystery Hurdles, Plant Invasion имеют 5 этапов (обычно 25 наград = 5x5)
-        if (rLen >= 10) {
-            val stagesByRewards = (rLen / 5).coerceIn(1, 5)
-            return stagesByRewards to true
-        }
-
-        // Проверяем, есть ли вообще в объекте какие-либо поля этапов
-        val hasStageField = STAGE_FIELD_NAMES.any { ch.has(it) }
-        if (hasStageField) {
-            return 5 to true
-        }
-
-        return 1 to false
-    }
-
-    // Считывает текущий этап из объекта испытания
-    private fun readCurrentStageFromChallenge(ch: JSONObject, maxStages: Int): Int {
-        for (field in STAGE_FIELD_NAMES) {
-            if (ch.has(field)) {
-                val raw = ch.optInt(field, 0)
-                // В игре индекс 0..4 соответствует этапам 1..5
-                return if (field.contains("Index", ignoreCase = true)) {
-                    (raw + 1).coerceIn(1, maxStages)
-                } else {
-                    raw.coerceIn(1, maxStages)
-                }
-            }
-        }
-        // Если прямого поля нет, считаем по открытым наградам в rewardStates
-        val rStates = ch.optJSONArray("rewardStates")
-        if (rStates != null && rStates.length() >= 5 && maxStages > 1) {
-            val curScore = ch.optLong("currentScore", 0L)
-            var passedRewards = 0
-            for (i in 0 until rStates.length()) {
-                val req = rStates.getJSONObject(i).optLong("RequiredScore", Long.MAX_VALUE)
-                if (curScore >= req) passedRewards++
-            }
-            val rewardsPerStage = (rStates.length() / maxStages).coerceAtLeast(1)
-            return ((passedRewards / rewardsPerStage) + 1).coerceIn(1, maxStages)
-        }
-        return 1
-    }
-
-    // Глубокая починка сломанной вкладки «События» (убирает накрученные 25 этапов из всех файлов!)
     fun fixEventsTabFreezeInMemory(state: ClassicMemoryState) {
         val statsCol = state.stats.optJSONObject("userStatCollection") ?: JSONObject()
         if (statsCol.optInt("102", 0) > 99999) {
             statsCol.put("102", 10)
         }
         state.stats.put("userStatCollection", statsCol)
-
-        // Чистим season_hunt.json от невалидных ярусов
         state.seasonHunt.remove("rewardsThisSeason")
         state.seasonHunt.put("lastUnlockedTierSeen", 0)
-        clampStagesRecursively(state.seasonHunt, 5)
 
-        // Чистим city_tour.json от накрученных 25 этапов
-        clampStagesRecursively(state.cityTour, 5)
-
-        // Чистим generic_challenges.json
         val challengeStates = state.challenges.optJSONObject("challengeStates")
         if (challengeStates != null) {
             val chKeys = challengeStates.keys()
             while (chKeys.hasNext()) {
                 val key = chKeys.next()
-                val ch = challengeStates.optJSONObject(key) ?: continue
-                val (maxStages, _) = detectMaxStagesForChallenge(key, ch)
-
-                // Удаляем смещение наград, которое ломает прогресс-бар
+                val ch = challengeStates.getJSONObject(key)
                 ch.remove("rewardUnlockOffset")
-
-                // Исправляем все поля этапов, если там было записано 25 (при максимуме 1..5)
-                for (field in STAGE_FIELD_NAMES) {
-                    if (ch.has(field)) {
-                        val cur = ch.optInt(field, 0)
-                        val maxAllowed = if (field.contains("Index", ignoreCase = true)) (maxStages - 1).coerceAtLeast(0) else maxStages
-                        if (cur > maxAllowed || cur < 0) {
-                            ch.put(field, maxAllowed)
-                        }
-                    }
-                }
-
-                // Сбрасываем таймеры и чиним сломанные статусы наград в rewardStates
-                ch.optJSONObject("requirements")?.put("cooldownItems", JSONObject())
                 val rStates = ch.optJSONArray("rewardStates") ?: JSONArray()
-                val curScore = ch.optLong("currentScore", 0L)
                 for (i in 0 until rStates.length()) {
                     val rs = rStates.getJSONObject(i)
-                    val req = rs.optLong("RequiredScore", 0L)
-                    // Если стоял принудительный State = 2 или этап > maxStages, возвращаем валидный State (0 или 1)
-                    if (rs.optInt("State", 0) >= 2) {
-                        rs.put("State", if (curScore >= req && curScore > 0) 1 else 0)
-                    }
-                    if (rs.has("Stage") && rs.optInt("Stage", 0) >= maxStages) {
-                        rs.put("Stage", (i * maxStages / rStates.length().coerceAtLeast(1)).coerceIn(0, maxStages - 1))
-                    }
+                    if (rs.optInt("State", 0) == 2) rs.put("State", 0)
                 }
             }
         }
     }
 
-    private fun clampStagesRecursively(node: Any?, maxLimit: Int) {
-        when (node) {
-            is JSONObject -> {
-                val keys = node.keys().asSequence().toList()
-                for (k in keys) {
-                    val v = node.opt(k)
-                    if (v is Number) {
-                        val low = k.lowercase()
-                        if (low.contains("stage") || low.contains("tier") || low.contains("step")) {
-                            if (v.toInt() > maxLimit) {
-                                node.put(k, maxLimit)
-                            }
-                        }
-                    } else {
-                        clampStagesRecursively(v, maxLimit)
-                    }
-                }
-            }
-            is JSONArray -> {
-                for (i in 0 until node.length()) clampStagesRecursively(node.opt(i), maxLimit)
-            }
-        }
-    }
+    // ==================== АКТИВНЫЕ СОБЫТИЯ И НАКРУТКА ОЧКОВ / ЭТАПОВ ====================
 
-    // Сканирует все активные события и возвращает информацию об очках и максимуме этапов
     fun getActiveChallenges(state: ClassicMemoryState): List<ActiveChallengeInfo> {
         val list = mutableListOf<ActiveChallengeInfo>()
         val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return list
@@ -488,94 +359,92 @@ object ClassicCryptoAndSyncManager {
                     if (req > maxReq) maxReq = req
                 }
             }
-
-            val (maxStages, hasStages) = detectMaxStagesForChallenge(key, ch)
-            val curStage = readCurrentStageFromChallenge(ch, maxStages)
+            if (maxReq == 0L) maxReq = 15000000L
 
             val friendlyTitle = when {
-                key.contains("marathon", ignoreCase = true) -> "🏃 Марафон (Без этапов)"
-                key.contains("pvp", ignoreCase = true) || key.contains("showdown", ignoreCase = true) -> "🏁 PvP-Забег (Subway Showdown)"
-                key.contains("lava", ignoreCase = true) -> "🌋 Пол — это лава ($maxStages эт.)"
-                key.contains("tag", ignoreCase = true) || key.contains("time", ignoreCase = true) -> "⏱️ Забег на время ($maxStages эт.)"
-                key.contains("mystery", ignoreCase = true) || key.contains("hurdle", ignoreCase = true) -> "🎁 Таинственные барьеры ($maxStages эт.)"
-                key.contains("plant", ignoreCase = true) || key.contains("invasion", ignoreCase = true) -> "🌿 Вторжение растений ($maxStages эт.)"
+                key.contains("marathon", ignoreCase = true) -> "🏃 Марафон ($key)"
+                key.contains("pvp", ignoreCase = true) || key.contains("showdown", ignoreCase = true) -> "🏁 Забег с соперниками ($key)"
+                key.contains("lava", ignoreCase = true) -> "🌋 Пол — это лава ($key)"
+                key.contains("tag", ignoreCase = true) || key.contains("time", ignoreCase = true) -> "⏱️ Забег на время ($key)"
+                key.contains("mystery", ignoreCase = true) || key.contains("hurdle", ignoreCase = true) -> "🎁 Таинственные барьеры ($key)"
+                key.contains("plant", ignoreCase = true) || key.contains("invasion", ignoreCase = true) -> "🌿 Вторжение лоз ($key)"
                 else -> "🏆 Событие: $key"
             }
 
-            list.add(
-                ActiveChallengeInfo(
-                    id = key,
-                    title = friendlyTitle,
-                    currentScore = curScore,
-                    maxScoreRequired = maxReq,
-                    currentStage = curStage,
-                    maxStages = maxStages,
-                    hasStages = hasStages,
-                    targetCity = city
-                )
-            )
+            list.add(ActiveChallengeInfo(key, friendlyTitle, curScore, maxReq, city))
         }
         return list
     }
 
-    // Безопасная ручная установка этапа (1..maxStages) и очков для выбранного испытания
-    fun setChallengeStageAndScoreCustom(
+    fun setChallengeScoreCustom(
         state: ClassicMemoryState,
         challengeId: String,
-        targetStageInput: Int,
-        targetScoreInput: Long?,
+        targetScore: Long,
         unlockStagesReward: Boolean
     ) {
+        state.challenges.put("patchVersion", 2)
         val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return
         val ch = challengeStates.optJSONObject(challengeId) ?: return
 
-        val (maxStages, hasStages) = detectMaxStagesForChallenge(challengeId, ch)
-        val safeStage = targetStageInput.coerceIn(1, maxStages) // Строго от 1 до maxStages (не выше 5!)
-        val safeStageZeroBased = (safeStage - 1).coerceAtLeast(0)
-
-        // Убираем ломающий смещение ключ
+        ch.put("currentScore", targetScore)
+        ch.put("highScore", maxOf(ch.optLong("highScore", 0L), targetScore))
+        ch.put("lastSeenScore", targetScore)
+        ch.put("lastSubmittedScore", targetScore)
+        ch.put("isCompleted", true)
         ch.remove("rewardUnlockOffset")
+        ch.remove("stageUnlockTimestamp")
 
-        // Записываем выбранный этап только в те поля этапа, которые реально существуют в объекте
-        if (hasStages) {
-            for (field in STAGE_FIELD_NAMES) {
-                if (ch.has(field)) {
-                    val valueToSet = if (field.contains("Index", ignoreCase = true)) safeStageZeroBased else safeStage
-                    ch.put(field, valueToSet)
-                }
-            }
+        ch.optJSONObject("requirements")?.apply {
+            put("cooldownItems", JSONObject())
+            remove("cooldownEndTime")
         }
 
-        // Рассчитываем очки, соответствующие выбранному этапу (или берём введённые вручную очки)
         val rStates = ch.optJSONArray("rewardStates")
-        var stageScoreThreshold = 0L
-        if (rStates != null && rStates.length() > 0) {
-            val rewardsPerStage = (rStates.length() / maxStages.coerceAtLeast(1)).coerceAtLeast(1)
-            val targetRewardIdx = ((safeStage * rewardsPerStage) - 1).coerceIn(0, rStates.length() - 1)
-            stageScoreThreshold = rStates.getJSONObject(targetRewardIdx).optLong("RequiredScore", 0L)
-        }
-
-        val finalScore = targetScoreInput ?: stageScoreThreshold
-        ch.put("currentScore", finalScore)
-        ch.put("highScore", maxOf(ch.optLong("highScore", 0L), finalScore))
-        ch.put("lastSeenScore", finalScore)
-        ch.put("lastSubmittedScore", finalScore)
-
-        // Сбрасываем таймеры ожидания сёрферов
-        ch.optJSONObject("requirements")?.put("cooldownItems", JSONObject())
-
-        // Аккуратно обновляем пороги наград (без опасного State = 2!)
         if (rStates != null) {
+            var unlockedStageIdx = 0
             for (i in 0 until rStates.length()) {
-                val rs = rStates.getJSONObject(i)
-                if (unlockStagesReward) {
-                    rs.put("AdRequired", false)
-                }
-                // Если в прошлом тут завис State = 2, сбрасываем его в 0 (игра сама подсветит кнопку «Забрать» по очкам)
-                if (rs.optInt("State", 0) >= 2) {
-                    rs.put("State", 0)
+                val rs = rStates.optJSONObject(i) ?: continue
+                val reqScore = rs.optLong("RequiredScore", 0L)
+                rs.put("AdRequired", false)
+                rs.remove("UnlockTime")
+                rs.remove("CooldownEnd")
+
+                if (targetScore >= reqScore || unlockStagesReward) {
+                    unlockedStageIdx = i + 1
+                    if (rs.optInt("State", 0) == 0 || rs.optInt("State", 0) == 2) {
+                        rs.put("State", 1)
+                    }
                 }
             }
+            if (ch.has("currentStage")) ch.put("currentStage", unlockedStageIdx)
+            if (ch.has("unlockedStage")) ch.put("unlockedStage", unlockedStageIdx)
+        }
+
+        val stagesArr = ch.optJSONArray("stages")
+        if (stagesArr != null) {
+            for (i in 0 until stagesArr.length()) {
+                val stg = stagesArr.optJSONObject(i) ?: continue
+                stg.put("currentScore", targetScore)
+                stg.put("isUnlocked", true)
+                stg.put("isCompleted", true)
+            }
+        }
+    }
+
+    fun completeAllChallengesInMemory(state: ClassicMemoryState, customScore: Long = 25000000L) {
+        val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return
+        val keys = challengeStates.keys().asSequence().toList()
+        for (key in keys) {
+            val ch = challengeStates.optJSONObject(key) ?: continue
+            var maxReq = customScore
+            val rStates = ch.optJSONArray("rewardStates")
+            if (rStates != null) {
+                for (i in 0 until rStates.length()) {
+                    val req = rStates.getJSONObject(i).optLong("RequiredScore", 0L)
+                    if (req > maxReq) maxReq = req
+                }
+            }
+            setChallengeScoreCustom(state, key, maxReq, true)
         }
     }
 
