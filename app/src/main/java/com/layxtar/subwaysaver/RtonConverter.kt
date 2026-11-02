@@ -10,6 +10,7 @@ object RtonConverter {
 
     private const val MAGIC_RTON = "RTON"
     private const val MAGIC_DONE = "DONE"
+    private val RTID_NUMERIC_REGEX = Regex("^(\\d+)\\.(\\d+)\\.([0-9a-fA-F]{1,8})@(.+)$")
 
     fun rtonToJson(bytes: ByteArray): JSONObject {
         val buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
@@ -140,8 +141,8 @@ object RtonConverter {
             0x13 -> 0
             0x20 -> buf.int
             0x21 -> 0
-            0x22 -> buf.float.toDouble()
-            0x23 -> 0.0
+            0x22 -> buf.float
+            0x23 -> 0.0f
             0x24 -> readVarInt(buf)
             0x25 -> readZigZag(buf)
             0x26 -> buf.int.toLong() and 0xFFFFFFFFL
@@ -184,7 +185,7 @@ object RtonConverter {
         }
     }
 
-    // ==================== ЗАПИСЬ JSON -> RTON ====================
+    // ==================== ЗАПИСЬ JSON -> RTON (БЕЗ ПОТЕРИ ТОЧНОСТИ DOUBLE И RTID) ====================
 
     fun jsonToRton(json: JSONObject): ByteArray {
         val out = ByteArrayOutputStream(65536)
@@ -211,8 +212,6 @@ object RtonConverter {
         out.write(v.toInt() and 0x7F)
     }
 
-    // Точная запись ASCII (0x90/0x91) и многобайтовых UTF-8 строк (0x92/0x93 и 0x82),
-    // где для не-ASCII строк строго указывается и число символов, и число байт!
     private fun writeString(
         out: ByteArrayOutputStream,
         str: String,
@@ -225,17 +224,31 @@ object RtonConverter {
                 out.write(0x84)
                 return
             }
+            val numMatch = RTID_NUMERIC_REGEX.matchEntire(inner)
+            if (numMatch != null) {
+                val v1 = numMatch.groupValues[1].toLongOrNull() ?: 0L
+                val v2 = numMatch.groupValues[2].toLongOrNull() ?: 0L
+                val hexInt = numMatch.groupValues[3].toLong(16).toInt()
+                val sheet = numMatch.groupValues[4]
+
+                out.write(0x83)
+                out.write(0x02)
+                writePlainString(out, sheet, r90Map, r92Map)
+                writeVarInt(out, v1)
+                writeVarInt(out, v2)
+                val b = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(hexInt)
+                out.write(b.array())
+                return
+            }
             if (inner.contains("@")) {
                 val parts = inner.split("@", limit = 2)
                 val left = parts[0]
                 val sheet = parts[1]
-                if (left.count { it == '.' } < 2) {
-                    out.write(0x83)
-                    out.write(0x03)
-                    writePlainString(out, sheet, r90Map, r92Map)
-                    writePlainString(out, left, r90Map, r92Map)
-                    return
-                }
+                out.write(0x83)
+                out.write(0x03)
+                writePlainString(out, sheet, r90Map, r92Map)
+                writePlainString(out, left, r90Map, r92Map)
+                return
             }
         }
         writePlainString(out, str, r90Map, r92Map)
@@ -262,8 +275,6 @@ object RtonConverter {
                 out.write(bytes)
             }
         } else {
-            // Для строк с кириллицей и спецсимволами (где bytes.size != str.length)
-            // движок PvZ 2 ТРЕБУЕТ опкод 0x82 (или 0x92/0x93), где сначала идёт длина в символах, а затем длина в байтах!
             val existingIdx = r92Map[str]
             if (existingIdx != null) {
                 out.write(0x93)
@@ -327,21 +338,26 @@ object RtonConverter {
                     out.write(b.array())
                 }
             }
-            is Double -> {
-                if (v == 0.0) {
-                    out.write(0x23)
-                } else {
-                    out.write(0x22)
-                    val b = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putFloat(v.toFloat())
-                    out.write(b.array())
-                }
-            }
             is Float -> {
                 if (v == 0f) {
                     out.write(0x23)
                 } else {
                     out.write(0x22)
                     val b = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putFloat(v)
+                    out.write(b.array())
+                }
+            }
+            is Double -> {
+                if (v == 0.0) {
+                    out.write(0x43)
+                } else if (v.toFloat().toDouble() == v) {
+                    out.write(0x22)
+                    val b = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putFloat(v.toFloat())
+                    out.write(b.array())
+                } else {
+                    // Сохраняем 64-битную точность Double (0x42) для таймстампов и больших чисел!
+                    out.write(0x42)
+                    val b = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putDouble(v)
                     out.write(b.array())
                 }
             }
