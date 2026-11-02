@@ -158,7 +158,7 @@ object CryptoAndSyncManager {
         val tempFile = "/data/local/tmp/ce_w_$uuid"
 
         return try {
-            execSh("cp '$path' '$path.bak_editor' 2>/dev/null")
+            execSh("if [ ! -f '$path.bak_editor' ]; then cp '$path' '$path.bak_editor' 2>/dev/null; fi")
             val base64 = Base64.encodeToString(data, Base64.NO_WRAP)
             var offset = 0
             while (offset < base64.length) {
@@ -237,6 +237,13 @@ object CryptoAndSyncManager {
         val iv = originalRawBytes.copyOfRange(0, 16)
         val key = originalRawBytes.copyOfRange(16, 32)
 
+        // Очищаем ошибочно созданные в прошлых версиях поля, из-за которых не запускалась игра!
+        innerProfileJson.remove("wallet")
+        innerProfileJson.remove("items")
+        innerProfileJson.remove("currencies")
+        innerProfileJson.remove("xpLevel")
+        innerProfileJson.remove("activeSeasonId")
+
         val futureTime = Instant.now().plusSeconds(300)
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSS'Z'").withZone(ZoneOffset.UTC)
         containerJson.put("lastUpdated", formatter.format(futureTime))
@@ -279,7 +286,66 @@ object CryptoAndSyncManager {
         }
     }
 
-    // ==================== СЁРФЕРЫ, СКИНЫ И ДОСКИ CITY ====================
+    // ==================== ОРИГИНАЛЬНЫЙ КОШЕЛЁК SUBWAY SURFERS CITY (МАССИВ "inventory" -> "id" + "Count") ====================
+
+    fun getCurrency(profile: JSONObject, tagId: Long): Int {
+        val inv = profile.optJSONArray("inventory") ?: return 0
+        for (i in 0 until inv.length()) {
+            val item = inv.optJSONObject(i) ?: continue
+            if (item.optLong("id") == tagId) {
+                return item.optInt("Count", item.optInt("count", 0))
+            }
+        }
+        return 0
+    }
+
+    fun setCurrency(profile: JSONObject, tagId: Long, count: Int) {
+        val inv = profile.optJSONArray("inventory") ?: JSONArray()
+        for (i in 0 until inv.length()) {
+            val item = inv.optJSONObject(i) ?: continue
+            if (item.optLong("id") == tagId) {
+                item.put("Count", count)
+                profile.put("inventory", inv)
+                return
+            }
+        }
+        inv.put(JSONObject().put("id", tagId).put("Count", count))
+        profile.put("inventory", inv)
+    }
+
+    fun readCityCurrencies(profile: JSONObject): Map<Long, Long> {
+        val result = mutableMapOf<Long, Long>()
+        for ((tag, _) in GameDatabase.CURRENCIES) {
+            result[tag] = getCurrency(profile, tag).toLong()
+        }
+        return result
+    }
+
+    fun writeCityCurrencies(profile: JSONObject, newValues: Map<Long, Long>) {
+        // Удаляем мусорные поля, если они остались с прошлого запуска
+        profile.remove("wallet")
+        profile.remove("items")
+        profile.remove("currencies")
+
+        for ((tag, amt) in newValues) {
+            val safeInt = amt.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+            setCurrency(profile, tag, safeInt)
+        }
+    }
+
+    fun readCityXpLevel(profile: JSONObject): Int {
+        return profile.optInt("level", 1).coerceAtLeast(1)
+    }
+
+    fun writeCityXpLevel(profile: JSONObject, level: Int) {
+        profile.remove("xpLevel")
+        profile.put("level", level.coerceAtLeast(1))
+        if (!profile.has("xp") || profile.opt("xp") !is Number) {
+            profile.put("xp", 500)
+        }
+    }
+
+    // ==================== ИНДИВИДУАЛЬНЫЙ РЕДАКТОР СЁРФЕРОВ, СКИНОВ И ДОСОК CITY ====================
 
     fun parseCitySurfers(profile: JSONObject): List<CitySurferState> {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
@@ -424,7 +490,7 @@ object CryptoAndSyncManager {
         profile.put("avatarProfiles", avatarsArray)
     }
 
-    // ==================== ОТКРЫТИЕ И ВЫБОР ТУРОВ (TOURS / CAMPAIGNS) И ТРАСС (DISTRICTS 1..6) В CITY ====================
+    // ==================== УПРАВЛЕНИЕ РАЙОНАМИ (ТРАССАМИ 1..6) И ТРИАЛАМИ ПО ВЫБОРУ ====================
 
     fun completeAllDistrictsAndStages(profile: JSONObject) {
         for (num in 1..6) {
@@ -437,29 +503,6 @@ object CryptoAndSyncManager {
         for (dNum in 2..6) {
             setCityDistrictUnlocked(profile, dNum, false)
         }
-        selectCityDistrict(profile, 1)
-    }
-
-    fun getSelectedCityDistrict(profile: JSONObject): Int {
-        if (profile.has("selectedDistrict")) {
-            val v = profile.opt("selectedDistrict")
-            if (v is Number) return v.toInt().coerceIn(1, 6)
-            if (v is String) return v.removePrefix("district_").toIntOrNull()?.coerceIn(1, 6) ?: 1
-        }
-        if (profile.has("currentDistrict")) {
-            val v = profile.opt("currentDistrict")
-            if (v is Number) return v.toInt().coerceIn(1, 6)
-            if (v is String) return v.removePrefix("district_").toIntOrNull()?.coerceIn(1, 6) ?: 1
-        }
-        return 1
-    }
-
-    fun selectCityDistrict(profile: JSONObject, districtNum: Int) {
-        val dKey = "district_$districtNum"
-        setCityDistrictUnlocked(profile, districtNum, true)
-        profile.put("selectedDistrict", districtNum)
-        profile.put("currentDistrict", dKey)
-        profile.put("lastPlayedDistrict", dKey)
     }
 
     fun isCityDistrictUnlocked(profile: JSONObject, districtNum: Int): Boolean {
@@ -481,30 +524,31 @@ object CryptoAndSyncManager {
         val maxStage = stageCounts[districtNum] ?: 36
 
         val distProf = profile.optJSONArray("districtProfiles") ?: JSONArray()
+        val usesNumericId = if (distProf.length() > 0) {
+            distProf.optJSONObject(0)?.opt("id") is Number
+        } else false
+
         val newDistProf = JSONArray()
-        var foundStr = false
-        var foundNum = false
+        var found = false
 
         for (i in 0 until distProf.length()) {
             val obj = distProf.optJSONObject(i) ?: continue
             val idVal = obj.opt("id")
-            if (idVal is String && idVal == dKey) {
-                foundStr = true
+            val isMatch = (idVal is String && idVal == dKey) || (idVal is Number && idVal.toInt() == districtNum)
+            if (isMatch) {
+                found = true
                 if (unlocked || districtNum == 1) {
-                    newDistProf.put(JSONObject().put("id", dKey).put("isUnlocked", true).put("wasSeen", true))
-                }
-            } else if (idVal is Number && idVal.toInt() == districtNum) {
-                foundNum = true
-                if (unlocked || districtNum == 1) {
-                    newDistProf.put(JSONObject().put("id", districtNum).put("isUnlocked", true).put("wasSeen", true))
+                    obj.put("isUnlocked", true)
+                    obj.put("wasSeen", true)
+                    newDistProf.put(obj)
                 }
             } else {
                 newDistProf.put(obj)
             }
         }
-        if (unlocked || districtNum == 1) {
-            if (!foundStr) newDistProf.put(JSONObject().put("id", dKey).put("isUnlocked", true).put("wasSeen", true))
-            if (!foundNum) newDistProf.put(JSONObject().put("id", districtNum).put("isUnlocked", true).put("wasSeen", true))
+        if ((unlocked || districtNum == 1) && !found) {
+            val idToPut: Any = if (usesNumericId) districtNum else dKey
+            newDistProf.put(JSONObject().put("id", idToPut).put("isUnlocked", true).put("wasSeen", true))
         }
         profile.put("districtProfiles", newDistProf)
 
@@ -516,7 +560,8 @@ object CryptoAndSyncManager {
             if (obj.optString("id") == dKey) {
                 foundCamp = true
                 if (unlocked || districtNum == 1) {
-                    newCampProf.put(JSONObject().put("id", dKey).put("isUnlocked", true))
+                    obj.put("isUnlocked", true)
+                    newCampProf.put(obj)
                 }
             } else {
                 newCampProf.put(obj)
@@ -557,85 +602,6 @@ object CryptoAndSyncManager {
             }
         }
         profile.put("goals", filteredGoals)
-    }
-
-    // Возвращает текущий выбранный Тур / Кампанию в City
-    fun getActiveCityTourId(profile: JSONObject): String {
-        val activeCamp = profile.optJSONObject("activeScheduledCampaignProfile")
-        val id = activeCamp?.optString("activeScheduledCampaignId", "") ?: ""
-        if (id.isNotEmpty()) return id
-        return GameDatabase.SCHEDULED_CAMPAIGNS.first().first
-    }
-
-    // Собирает все доступные Туры (из базы + любые новые туры из самого сохранения игрока)
-    fun getAllAvailableCityTours(profile: JSONObject): List<Pair<String, String>> {
-        val result = LinkedHashMap<String, String>()
-        for ((id, title) in GameDatabase.SCHEDULED_CAMPAIGNS) {
-            result[id] = title
-        }
-        // Дополнительно добавляем стандартные идентификаторы туров City
-        result["scheduled_campaign_04"] = "Ивентовый Тур 4 (scheduled_campaign_04)"
-        result["scheduled_campaign_05"] = "Ивентовый Тур 5 (scheduled_campaign_05)"
-        result["city_tour_01"] = "Городской Тур 1 (city_tour_01)"
-        result["city_tour_02"] = "Городской Тур 2 (city_tour_02)"
-        result["city_tour_03"] = "Городской Тур 3 (city_tour_03)"
-
-        val curActive = profile.optJSONObject("activeScheduledCampaignProfile")
-            ?.optString("activeScheduledCampaignId", "") ?: ""
-        if (curActive.isNotEmpty() && !result.containsKey(curActive)) {
-            result[curActive] = "Текущий Тур из сохранения ($curActive)"
-        }
-
-        // Сканируем goals на наличие других префиксов туров
-        val goals = profile.optJSONArray("goals")
-        if (goals != null) {
-            for (i in 0 until goals.length()) {
-                val gId = goals.optJSONObject(i)?.optString("id", "") ?: ""
-                if (gId.contains("_stage") && !gId.startsWith("district")) {
-                    val pref = gId.substringBefore("_stage")
-                    if (pref.isNotEmpty() && !result.containsKey(pref)) {
-                        result[pref] = "Обнаруженный Тур / Триал ($pref)"
-                    }
-                }
-            }
-        }
-        return result.entries.map { it.key to it.value }
-    }
-
-    // Выбирает активный Тур в City и открывает для него всех персонажей и этапы
-    fun selectActiveCityTour(profile: JSONObject, tourId: String, unlockStages: Boolean = true) {
-        val activeCamp = profile.optJSONObject("activeScheduledCampaignProfile") ?: JSONObject()
-        activeCamp.put("activeScheduledCampaignId", tourId)
-        activeCamp.put("isUnlocked", true)
-        activeCamp.put("wasSeen", true)
-        activeCamp.put("playableSurfers", JSONArray().apply {
-            for ((sId, _) in GameDatabase.SURFERS) put(sId)
-        })
-        profile.put("activeScheduledCampaignProfile", activeCamp)
-
-        // Записываем также в массив кампаний / туров, если он есть в профиле
-        val campArr = profile.optJSONArray("scheduledCampaignProfiles") ?: JSONArray()
-        var found = false
-        for (i in 0 until campArr.length()) {
-            val obj = campArr.optJSONObject(i) ?: continue
-            if (obj.optString("id") == tourId) {
-                obj.put("isUnlocked", true)
-                obj.put("wasSeen", true)
-                found = true
-            }
-        }
-        if (!found) {
-            campArr.put(JSONObject().apply {
-                put("id", tourId)
-                put("isUnlocked", true)
-                put("wasSeen", true)
-            })
-        }
-        profile.put("scheduledCampaignProfiles", campArr)
-
-        if (unlockStages) {
-            setCityTrialOrCampaignCompleted(profile, tourId, 10, true, false)
-        }
     }
 
     fun isCityTrialOrCampaignCompleted(profile: JSONObject, prefixId: String): Boolean {
@@ -689,7 +655,12 @@ object CryptoAndSyncManager {
         profile.put("goals", newGoals)
 
         if (setAsActiveCampaign && completed) {
-            selectActiveCityTour(profile, prefixId, false)
+            val activeCamp = profile.optJSONObject("activeScheduledCampaignProfile") ?: JSONObject()
+            activeCamp.put("activeScheduledCampaignId", prefixId)
+            activeCamp.put("playableSurfers", JSONArray().apply {
+                for ((sId, _) in GameDatabase.SURFERS) put(sId)
+            })
+            profile.put("activeScheduledCampaignProfile", activeCamp)
         }
 
         val trials = profile.optJSONArray("dailyTrials")
@@ -701,7 +672,6 @@ object CryptoAndSyncManager {
                 }
             }
         }
-        profile.put("timers", JSONObject())
     }
 
     fun completeAllDailyAndWeeklyMissions(profile: JSONObject) {
@@ -804,8 +774,8 @@ object CryptoAndSyncManager {
     }
 
     fun unlockAllEventTrialsAnd3StarMissions(profile: JSONObject) {
-        for ((campId, _) in getAllAvailableCityTours(profile)) {
-            setCityTrialOrCampaignCompleted(profile, campId, 10, true, false)
+        for ((campId, _) in GameDatabase.SCHEDULED_CAMPAIGNS) {
+            setCityTrialOrCampaignCompleted(profile, campId, 7, true, false)
         }
         val trialPrefixes = listOf("trial", "daily_trial", "event_trial", "weekly_trial")
         for (prefix in trialPrefixes) {
@@ -821,7 +791,6 @@ object CryptoAndSyncManager {
         })
         profile.put("activeScheduledCampaignProfile", activeCamp)
 
-        profile.put("timers", JSONObject())
         profile.optJSONObject("onlinePlayerProfile")?.put("renameableAt", "0001-01-01T00:00:00")
 
         val ftue = profile.optJSONObject("ftue") ?: JSONObject()
