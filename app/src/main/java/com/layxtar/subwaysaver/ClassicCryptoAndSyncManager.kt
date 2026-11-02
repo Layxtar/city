@@ -13,6 +13,8 @@ data class ActiveChallengeInfo(
     val title: String,
     val currentScore: Long,
     val maxScoreRequired: Long,
+    val unlockedStagesCount: Int,
+    val totalStagesCount: Int,
     val targetCity: String
 )
 
@@ -247,6 +249,7 @@ object ClassicCryptoAndSyncManager {
         state.seasonHunt.put("collectedTokens", amount)
         state.seasonHunt.put("currentPoints", amount)
         state.seasonHunt.put("points", amount)
+        state.seasonHunt.put("unlockedTier", 40)
 
         val shKeys = state.seasonHunt.keys().asSequence().toList()
         for (k in shKeys) {
@@ -327,17 +330,17 @@ object ClassicCryptoAndSyncManager {
             while (chKeys.hasNext()) {
                 val key = chKeys.next()
                 val ch = challengeStates.getJSONObject(key)
-                ch.remove("rewardUnlockOffset")
+                ch.put("rewardUnlockOffset", 1209600)
                 val rStates = ch.optJSONArray("rewardStates") ?: JSONArray()
                 for (i in 0 until rStates.length()) {
                     val rs = rStates.getJSONObject(i)
-                    if (rs.optInt("State", 0) == 2) rs.put("State", 0)
+                    if (rs.optInt("State", 0) == 2) rs.put("State", 1)
                 }
             }
         }
     }
 
-    // ==================== АКТИВНЫЕ СОБЫТИЯ И НАКРУТКА ОЧКОВ / ЭТАПОВ ====================
+    // ==================== ОТДЕЛЬНОЕ ОТКРЫТИЕ ЭТАПОВ (STAGES) И ОЧКОВ В СОБЫТИЯХ CLASSIC ====================
 
     fun getActiveChallenges(state: ClassicMemoryState): List<ActiveChallengeInfo> {
         val list = mutableListOf<ActiveChallengeInfo>()
@@ -352,11 +355,17 @@ object ClassicCryptoAndSyncManager {
             val city = ch.optString("targetCity", "default")
 
             var maxReq = 0L
+            var unlockedStages = 0
+            var totalStages = 0
             val rStates = ch.optJSONArray("rewardStates")
             if (rStates != null) {
+                totalStages = rStates.length()
                 for (i in 0 until rStates.length()) {
-                    val req = rStates.getJSONObject(i).optLong("RequiredScore", 0L)
+                    val rs = rStates.optJSONObject(i) ?: continue
+                    val req = rs.optLong("RequiredScore", rs.optLong("requiredScore", 0L))
                     if (req > maxReq) maxReq = req
+                    val stVal = rs.optInt("State", rs.optInt("state", 0))
+                    if (stVal >= 1) unlockedStages++
                 }
             }
             if (maxReq == 0L) maxReq = 15000000L
@@ -371,9 +380,89 @@ object ClassicCryptoAndSyncManager {
                 else -> "🏆 Событие: $key"
             }
 
-            list.add(ActiveChallengeInfo(key, friendlyTitle, curScore, maxReq, city))
+            list.add(ActiveChallengeInfo(key, friendlyTitle, curScore, maxReq, unlockedStages, totalStages, city))
         }
         return list
+    }
+
+    /**
+     * Полная отдельная прошивка Очков и Этапов для события Classic:
+     * @param targetScore целевые очки забега
+     * @param targetStageCount сколько этапов/ступеней открыть (например, 25)
+     * @param targetRewardState какое состояние прописать этапам: 1 = Готово к сбору, 2 = Уже собрано (для принудительного перехода на следующий этап)
+     * @param resetLastSeenScoreForAutoEval если true, ставит lastSeenScore = 0, чтобы сам движок игры при входе пересчитал очки и открыл этапы!
+     */
+    fun setChallengeScoreAndStagesSeparate(
+        state: ClassicMemoryState,
+        challengeId: String,
+        targetScore: Long,
+        targetStageCount: Int = 25,
+        targetRewardState: Int = 1,
+        resetLastSeenScoreForAutoEval: Boolean = true
+    ) {
+        state.challenges.put("patchVersion", 2)
+        val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return
+        val ch = challengeStates.optJSONObject(challengeId) ?: return
+
+        // 1. Очки + сброс lastSeenScore в 0 (чтобы игра при открытии вкладки сама засчитала прогресс по порогам!)
+        ch.put("currentScore", targetScore)
+        ch.put("highScore", maxOf(ch.optLong("highScore", 0L), targetScore))
+        ch.put("lastSeenScore", if (resetLastSeenScoreForAutoEval) 0L else targetScore)
+        ch.put("lastSubmittedScore", targetScore)
+
+        // 2. Снятие 24-часового таймера между этапами (1209600 сек = +14 дней сдвига вперёд!)
+        ch.put("rewardUnlockOffset", 1209600)
+        ch.remove("stageUnlockTimestamp")
+        ch.remove("cooldownEndTime")
+
+        // 3. Отдельные поля текущего открытого этапа (на случай многоступенчатых событий 1..5)
+        ch.put("currentStage", 5)
+        ch.put("currentStageIndex", 4)
+        ch.put("stageIndex", 4)
+        ch.put("unlockedStage", 5)
+        ch.put("unlockedStageIndex", 4)
+        ch.put("lastUnlockedStageSeen", 5)
+
+        // 4. Сброс кулдауна персонажей события
+        ch.optJSONObject("requirements")?.apply {
+            put("cooldownItems", JSONObject())
+            remove("cooldownEndTime")
+        }
+
+        // 5. Отдельная прошивка массива этапов/наград rewardStates (и в PascalCase, и в camelCase)
+        val rStates = ch.optJSONArray("rewardStates") ?: JSONArray()
+        val countToProcess = maxOf(rStates.length(), targetStageCount.coerceIn(1, 50))
+
+        for (i in 0 until countToProcess) {
+            val rs = rStates.optJSONObject(i) ?: JSONObject().also { rStates.put(i, it) }
+            val stepScore = if (rs.has("RequiredScore") || rs.has("requiredScore")) {
+                rs.optLong("RequiredScore", rs.optLong("requiredScore", (i + 1) * 50000L))
+            } else {
+                (i + 1) * 50000L
+            }
+            rs.put("RequiredScore", stepScore)
+            rs.put("AdRequired", false)
+            rs.put("adRequired", false)
+            rs.put("State", targetRewardState)
+            rs.put("state", targetRewardState)
+            rs.put("isUnlocked", true)
+            rs.remove("UnlockTime")
+            rs.remove("CooldownEnd")
+        }
+        ch.put("rewardStates", rStates)
+
+        // 6. Если есть вложенный массив stages — открываем каждый этап отдельно
+        val stagesArr = ch.optJSONArray("stages")
+        if (stagesArr != null) {
+            for (i in 0 until stagesArr.length()) {
+                val stg = stagesArr.optJSONObject(i) ?: continue
+                stg.put("currentScore", targetScore)
+                stg.put("lastSeenScore", 0L)
+                stg.put("isUnlocked", true)
+                stg.put("isCompleted", true)
+                stg.put("State", targetRewardState)
+            }
+        }
     }
 
     fun setChallengeScoreCustom(
@@ -382,56 +471,23 @@ object ClassicCryptoAndSyncManager {
         targetScore: Long,
         unlockStagesReward: Boolean
     ) {
-        state.challenges.put("patchVersion", 2)
-        val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return
-        val ch = challengeStates.optJSONObject(challengeId) ?: return
-
-        ch.put("currentScore", targetScore)
-        ch.put("highScore", maxOf(ch.optLong("highScore", 0L), targetScore))
-        ch.put("lastSeenScore", targetScore)
-        ch.put("lastSubmittedScore", targetScore)
-        ch.put("isCompleted", true)
-        ch.remove("rewardUnlockOffset")
-        ch.remove("stageUnlockTimestamp")
-
-        ch.optJSONObject("requirements")?.apply {
-            put("cooldownItems", JSONObject())
-            remove("cooldownEndTime")
-        }
-
-        val rStates = ch.optJSONArray("rewardStates")
-        if (rStates != null) {
-            var unlockedStageIdx = 0
-            for (i in 0 until rStates.length()) {
-                val rs = rStates.optJSONObject(i) ?: continue
-                val reqScore = rs.optLong("RequiredScore", 0L)
-                rs.put("AdRequired", false)
-                rs.remove("UnlockTime")
-                rs.remove("CooldownEnd")
-
-                if (targetScore >= reqScore || unlockStagesReward) {
-                    unlockedStageIdx = i + 1
-                    if (rs.optInt("State", 0) == 0 || rs.optInt("State", 0) == 2) {
-                        rs.put("State", 1)
-                    }
-                }
-            }
-            if (ch.has("currentStage")) ch.put("currentStage", unlockedStageIdx)
-            if (ch.has("unlockedStage")) ch.put("unlockedStage", unlockedStageIdx)
-        }
-
-        val stagesArr = ch.optJSONArray("stages")
-        if (stagesArr != null) {
-            for (i in 0 until stagesArr.length()) {
-                val stg = stagesArr.optJSONObject(i) ?: continue
-                stg.put("currentScore", targetScore)
-                stg.put("isUnlocked", true)
-                stg.put("isCompleted", true)
-            }
-        }
+        setChallengeScoreAndStagesSeparate(
+            state = state,
+            challengeId = challengeId,
+            targetScore = targetScore,
+            targetStageCount = 25,
+            targetRewardState = 1,
+            resetLastSeenScoreForAutoEval = true
+        )
     }
 
-    fun completeAllChallengesInMemory(state: ClassicMemoryState, customScore: Long = 25000000L) {
+    fun completeAllChallengesInMemory(
+        state: ClassicMemoryState,
+        customScore: Long = 25000000L,
+        targetStageCount: Int = 25,
+        targetRewardState: Int = 1,
+        resetLastSeenScore: Boolean = true
+    ) {
         val challengeStates = state.challenges.optJSONObject("challengeStates") ?: return
         val keys = challengeStates.keys().asSequence().toList()
         for (key in keys) {
@@ -444,7 +500,60 @@ object ClassicCryptoAndSyncManager {
                     if (req > maxReq) maxReq = req
                 }
             }
-            setChallengeScoreCustom(state, key, maxReq, true)
+            setChallengeScoreAndStagesSeparate(
+                state = state,
+                challengeId = key,
+                targetScore = maxReq,
+                targetStageCount = targetStageCount,
+                targetRewardState = targetRewardState,
+                resetLastSeenScoreForAutoEval = resetLastSeenScore
+            )
+        }
+    }
+
+    // Отдельное открытие всех этапов Городского Тура (city_tour.json) и Квестов (quests.json) в Classic
+    fun unlockAllClassicCityTourAndQuestsStages(state: ClassicMemoryState) {
+        state.cityTour.put("patchVersion", 1)
+        state.cityTour.put("currentStage", 20)
+        state.cityTour.put("unlockedStage", 20)
+        state.cityTour.put("isCompleted", true)
+
+        val ctKeys = state.cityTour.keys().asSequence().toList()
+        for (k in ctKeys) {
+            val sub = state.cityTour.optJSONObject(k)
+            if (sub != null) {
+                sub.put("isUnlocked", true)
+                sub.put("isCompleted", true)
+                if (sub.has("currentStage")) sub.put("currentStage", 20)
+                if (sub.has("progress")) sub.put("progress", 999999)
+            }
+            val arr = state.cityTour.optJSONArray(k)
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.apply {
+                        put("isUnlocked", true)
+                        put("isCompleted", true)
+                        put("State", 1)
+                        put("state", 1)
+                    }
+                }
+            }
+        }
+
+        // Открываем все активные квесты в quests.json
+        val qKeys = state.quests.keys().asSequence().toList()
+        for (k in qKeys) {
+            val arr = state.quests.optJSONArray(k)
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    arr.optJSONObject(i)?.apply {
+                        put("progress", 999999)
+                        put("currentProgress", 999999)
+                        put("isCompleted", true)
+                        put("State", 1)
+                    }
+                }
+            }
         }
     }
 
