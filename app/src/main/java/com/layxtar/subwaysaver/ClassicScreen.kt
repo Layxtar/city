@@ -53,8 +53,7 @@ fun ClassicScreen(
 
     var activeChallengesList by remember { mutableStateOf<List<ActiveChallengeInfo>>(emptyList()) }
     var selectedChallengeId by remember { mutableStateOf("") }
-    var customStageInput by remember { mutableStateOf("1") }
-    var customScoreInput by remember { mutableStateOf("1000000") }
+    var customScoreInput by remember { mutableStateOf("15000000") }
     var unlockStagesCheckbox by remember { mutableStateOf(true) }
 
     var searchQuery by remember { mutableStateOf("") }
@@ -105,11 +104,9 @@ fun ClassicScreen(
 
         val chList = ClassicCryptoAndSyncManager.getActiveChallenges(st)
         activeChallengesList = chList
-        if (chList.isNotEmpty()) {
-            val currentInfo = chList.find { it.id == selectedChallengeId } ?: chList.first()
-            selectedChallengeId = currentInfo.id
-            customStageInput = currentInfo.currentStage.toString()
-            customScoreInput = maxOf(currentInfo.maxScoreRequired, currentInfo.currentScore).toString()
+        if (chList.isNotEmpty() && (selectedChallengeId.isEmpty() || chList.none { it.id == selectedChallengeId })) {
+            selectedChallengeId = chList.first().id
+            customScoreInput = maxOf(chList.first().maxScoreRequired, 15000000L).toString()
         }
         uiTrigger++
     }
@@ -220,7 +217,7 @@ fun ClassicScreen(
                 ScrollableTabRow(selectedTabIndex = selectedTab) {
                     val tabs = listOf(
                         "💰 Кошелёк",
-                        "🏆 Ивенты & Этапы",
+                        "🏆 Ивенты & Медали",
                         "🏄 Сёрферы ($unlockedSurfersCount/$totalSurfersCount | 👕$unlockedSubOutfitsCount/$totalSubOutfitsCount)",
                         "🛹 Доски ($unlockedBoardsCount/$totalBoardsCount | ⚡$unlockedBoardUpgradesCount/$totalBoardUpgradesCount)",
                         "🖼️ Рамки ($unlockedFramesCount/$totalFramesCount) & Аватарки ($unlockedPortraitsCount/$totalPortraitsCount)",
@@ -280,7 +277,7 @@ fun ClassicScreen(
                 }
             } else {
                 when (selectedTab) {
-                    // ВКЛАДКА 0: КОШЕЛЁК И ЖЕТОНЫ ЛЕТУЧИХ МЫШЕК
+                    // ВКЛАДКА 0: КОШЕЛЁК И ЛЕТУЧИЕ МЫШКИ
                     0 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -344,48 +341,18 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 1: РУЧНОЕ РЕДАКТИРОВАНИЕ ЭТАПОВ (1..5), ОЧКОВ И ПОЧИНКА СЛОМАННОЙ ВКЛАДКИ СОБЫТИЙ
+                    // ВКЛАДКА 1: ИВЕНТЫ И МЕДАЛИ TOP RUN (РАБОЧЕЕ ПРОХОЖДЕНИЕ ВЫБРАННОГО ИЛИ ВСЕХ СРАЗУ)
                     1 -> {
-                        val selectedInfo = activeChallengesList.find { it.id == selectedChallengeId }
-
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Spacer(modifier = Modifier.height(6.dp))
 
-                            // Кнопка экстренной починки вкладки событий после старого бага с 25 этапами
-                            Card(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    Text("🛠️ Починка вкладки «События»", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color(0xFFFFB74D))
-                                    Text(
-                                        "Если вкладка событий перестала открываться из-за старой накрутки 25 этапов — нажми кнопку ниже, а затем «💾 Сохранить».",
-                                        fontSize = 11.sp,
-                                        color = Color.Gray
-                                    )
-                                    Button(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                                        onClick = {
-                                            pushUndo()
-                                            ClassicCryptoAndSyncManager.fixEventsTabFreezeInMemory(st)
-                                            refreshUIFromState(st)
-                                            log("🛠️ Все сломанные этапы (25 -> макс. 1..5) и статусы наград в событиях успешно исправлены!")
-                                        }
-                                    ) {
-                                        Text("🛠️ ПОЧИНИТЬ ВКЛАДКУ СОБЫТИЙ (СБРОС 25 ЭТАПОВ В НОРМУ)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                    }
-                                }
-                            }
-
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("🏆 Ручной Редактор Этапов (1..5) и Очков Событий", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text(
-                                        "Выбери активное испытание. Редактор автоматически определяет, есть ли у него этапы и сколько их максимум (не более 5):",
-                                        fontSize = 12.sp,
-                                        color = Color.Gray
-                                    )
+                                    Text("🏆 Накрутка Очков и Прохождение Событий", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text("Заполняет шкалу очков и переводит все этапы наград в состояние 'Готово к сбору' (State = 1):", fontSize = 12.sp, color = Color.Gray)
 
                                     if (activeChallengesList.isEmpty()) {
                                         Text("⚠️ Активных ивентов в generic_challenges.json не обнаружено.", color = Color.Yellow, fontSize = 12.sp)
@@ -399,120 +366,62 @@ fun ClassicScreen(
                                                     selected = selectedChallengeId == info.id,
                                                     onClick = {
                                                         selectedChallengeId = info.id
-                                                        customStageInput = info.currentStage.toString()
                                                         customScoreInput = maxOf(info.maxScoreRequired, info.currentScore).toString()
                                                     }
                                                 )
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Text(info.title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                                    val stageLabel = if (info.hasStages) {
-                                                        "Этап: ${info.currentStage} из ${info.maxStages}"
-                                                    } else {
-                                                        "Этапов нет (1/1)"
-                                                    }
                                                     Text(
-                                                        "$stageLabel | Очки: ${info.currentScore} / ${info.maxScoreRequired} (${info.targetCity})",
+                                                        "Текущий счёт: ${info.currentScore} | Для финала: ${info.maxScoreRequired} (${info.targetCity})",
                                                         fontSize = 11.sp,
-                                                        color = Color(0xFF81C784)
+                                                        color = if (info.currentScore >= info.maxScoreRequired && info.maxScoreRequired > 0) Color(0xFF81C784) else Color.Gray
                                                     )
                                                 }
                                             }
                                         }
 
-                                        Divider(modifier = Modifier.padding(vertical = 4.dp))
+                                        OutlinedTextField(
+                                            value = customScoreInput,
+                                            onValueChange = { customScoreInput = it },
+                                            label = { Text("Очки для накрутки") },
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
 
-                                        if (selectedInfo != null) {
-                                            if (selectedInfo.hasStages) {
-                                                Text(
-                                                    "Выбор этапа для '${selectedInfo.title}' (Максимум: ${selectedInfo.maxStages}):",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.SemiBold
-                                                )
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                                ) {
-                                                    for (stNum in 1..selectedInfo.maxStages) {
-                                                        FilterChip(
-                                                            selected = customStageInput == stNum.toString(),
-                                                            onClick = { customStageInput = stNum.toString() },
-                                                            label = { Text("Этап $stNum", fontSize = 12.sp) }
-                                                        )
-                                                    }
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(checked = unlockStagesCheckbox, onCheckedChange = { unlockStagesCheckbox = it })
+                                            Text("Разблокировать все этапы наград и убрать таймеры", fontSize = 12.sp)
+                                        }
+
+                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Button(
+                                                modifier = Modifier.weight(1f),
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100)),
+                                                onClick = {
+                                                    pushUndo()
+                                                    val score = customScoreInput.toLongOrNull() ?: 15000000L
+                                                    ClassicCryptoAndSyncManager.setChallengeScoreCustom(
+                                                        state = st,
+                                                        challengeId = selectedChallengeId,
+                                                        targetScore = score,
+                                                        unlockStagesReward = unlockStagesCheckbox
+                                                    )
+                                                    refreshUIFromState(st)
+                                                    log("🏆 В событие '$selectedChallengeId' записано $score очков и открыты этапы наград!")
                                                 }
-                                            } else {
-                                                Text(
-                                                    "ℹ️ В режиме '${selectedInfo.title}' нет деления на этапы (доступно только редактирование очков).",
-                                                    fontSize = 11.sp,
-                                                    color = Color.Gray
-                                                )
-                                            }
+                                            ) { Text("🎯 В выбранный ивент", fontSize = 11.sp, color = Color.White) }
 
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                OutlinedTextField(
-                                                    value = if (selectedInfo.hasStages) customStageInput else "1",
-                                                    onValueChange = { v ->
-                                                        val num = (v.toIntOrNull() ?: 1).coerceIn(1, selectedInfo.maxStages)
-                                                        customStageInput = num.toString()
-                                                    },
-                                                    enabled = selectedInfo.hasStages,
-                                                    label = { Text("Этап (1..${selectedInfo.maxStages})") },
-                                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                                    modifier = Modifier.weight(0.9f)
-                                                )
-
-                                                OutlinedTextField(
-                                                    value = customScoreInput,
-                                                    onValueChange = { customScoreInput = it },
-                                                    label = { Text("Очки / Кубки") },
-                                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                                    modifier = Modifier.weight(1.3f)
-                                                )
-                                            }
-
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Checkbox(checked = unlockStagesCheckbox, onCheckedChange = { unlockStagesCheckbox = it })
-                                                Text("Снять рекламу со сбора наград и кулдауны персонажей", fontSize = 12.sp)
-                                            }
-
-                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                Button(
-                                                    modifier = Modifier.weight(1f),
-                                                    onClick = {
-                                                        pushUndo()
-                                                        val stageVal = (customStageInput.toIntOrNull() ?: selectedInfo.maxStages)
-                                                            .coerceIn(1, selectedInfo.maxStages)
-                                                        val scoreVal = customScoreInput.toLongOrNull()
-                                                        ClassicCryptoAndSyncManager.setChallengeStageAndScoreCustom(
-                                                            state = st,
-                                                            challengeId = selectedInfo.id,
-                                                            targetStageInput = stageVal,
-                                                            targetScoreInput = scoreVal,
-                                                            unlockStagesReward = unlockStagesCheckbox
-                                                        )
-                                                        refreshUIFromState(st)
-                                                        log("🏆 В '${selectedInfo.title}' установлен этап $stageVal/${selectedInfo.maxStages} и очки ${scoreVal ?: "авто"}!")
-                                                    }
-                                                ) { Text("Применить в выбранный", fontSize = 11.sp) }
-
-                                                OutlinedButton(
-                                                    modifier = Modifier.weight(1f),
-                                                    onClick = {
-                                                        pushUndo()
-                                                        activeChallengesList.forEach { info ->
-                                                            ClassicCryptoAndSyncManager.setChallengeStageAndScoreCustom(
-                                                                state = st,
-                                                                challengeId = info.id,
-                                                                targetStageInput = info.maxStages, // Строго реальный максимум (1..5), а не 25!
-                                                                targetScoreInput = maxOf(info.maxScoreRequired, 500000L),
-                                                                unlockStagesReward = unlockStagesCheckbox
-                                                            )
-                                                        }
-                                                        refreshUIFromState(st)
-                                                        log("🏆 Все активные ивенты безопасно пройдены до их максимального этапа (1..5)!")
-                                                    }
-                                                ) { Text("Пройти все (Безопасно)", fontSize = 11.sp) }
-                                            }
+                                            Button(
+                                                modifier = Modifier.weight(1f),
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                                onClick = {
+                                                    pushUndo()
+                                                    val score = customScoreInput.toLongOrNull() ?: 25000000L
+                                                    ClassicCryptoAndSyncManager.completeAllChallengesInMemory(st, score)
+                                                    refreshUIFromState(st)
+                                                    log("🏆 ВСЕ активные события пройдены на $score очков (все этапы открыты к сбору)!")
+                                                }
+                                            ) { Text("🔥 Пройти ВСЕ сразу", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold) }
                                         }
                                     }
                                 }
@@ -536,11 +445,20 @@ fun ClassicScreen(
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                         modifier = Modifier.fillMaxWidth()
                                     )
-                                    Button(modifier = Modifier.fillMaxWidth(), onClick = {
-                                        pushUndo()
-                                        applyUIToState(st)
-                                        log("🏅 Медали Top Run сохранены!")
-                                    }) { Text("Применить медали Top Run") }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Button(modifier = Modifier.weight(1f), onClick = {
+                                            pushUndo()
+                                            applyUIToState(st)
+                                            log("🏅 Медали Top Run сохранены!")
+                                        }) { Text("Применить медали") }
+
+                                        OutlinedButton(modifier = Modifier.weight(1f), onClick = {
+                                            pushUndo()
+                                            ClassicCryptoAndSyncManager.fixEventsTabFreezeInMemory(st)
+                                            refreshUIFromState(st)
+                                            log("🛠️ Ошибки вкладки событий устранены!")
+                                        }) { Text("Починить фриз") }
+                                    }
                                 }
                             }
                             Spacer(modifier = Modifier.height(90.dp))
@@ -855,7 +773,7 @@ fun ClassicScreen(
                         }
                     }
 
-                    // ВКЛАДКА 4: РАМКИ И АВАТАРКИ С ПОИСКОМ И ФИЛЬТРАМИ
+                    // ВКЛАДКА 4: РАМКИ И АВАТАРКИ С ПОИСКОМ
                     4 -> {
                         val currentFrame = st.frames.optString("selected", "default_frame")
                         val currentPortrait = st.portraits.optString("selected", "jake_portrait")
