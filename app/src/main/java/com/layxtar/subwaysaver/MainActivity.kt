@@ -3,7 +3,9 @@ package com.layxtar.subwaysaver
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,7 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-enum class ActiveGame { CITY, CLASSIC, PVZ2 }
+enum class ActiveGame { CITY, CLASSIC, PVZ2, BEST_FIENDS }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,50 +48,57 @@ fun MultiGameEditorRoot(activity: ComponentActivity) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Верхняя шапка переключения игр
         Surface(color = Color(0xFF161616), tonalElevation = 4.dp) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("Ultimate Editor", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Button(
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        onClick = { activeGame = ActiveGame.CITY },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (activeGame == ActiveGame.CITY) Color(0xFF1976D2) else Color.DarkGray
-                        )
-                    ) { Text("🏙️ CITY", fontSize = 11.sp) }
+                Text("Ultimate", fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.padding(end = 4.dp))
 
-                    Button(
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        onClick = { activeGame = ActiveGame.CLASSIC },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (activeGame == ActiveGame.CLASSIC) Color(0xFFE65100) else Color.DarkGray
-                        )
-                    ) { Text("🛹 CLASSIC", fontSize = 11.sp) }
+                Button(
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    onClick = { activeGame = ActiveGame.CITY },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (activeGame == ActiveGame.CITY) Color(0xFF1976D2) else Color.DarkGray
+                    )
+                ) { Text("🏙️ CITY", fontSize = 11.sp) }
 
-                    Button(
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        onClick = { activeGame = ActiveGame.PVZ2 },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (activeGame == ActiveGame.PVZ2) Color(0xFF2E7D32) else Color.DarkGray
-                        )
-                    ) { Text("🌻 PVZ 2", fontSize = 11.sp) }
-                }
+                Button(
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    onClick = { activeGame = ActiveGame.CLASSIC },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (activeGame == ActiveGame.CLASSIC) Color(0xFFE65100) else Color.DarkGray
+                    )
+                ) { Text("🛹 CLASSIC", fontSize = 11.sp) }
+
+                Button(
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    onClick = { activeGame = ActiveGame.PVZ2 },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (activeGame == ActiveGame.PVZ2) Color(0xFF2E7D32) else Color.DarkGray
+                    )
+                ) { Text("🌻 PVZ 2", fontSize = 11.sp) }
+
+                Button(
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    onClick = { activeGame = ActiveGame.BEST_FIENDS },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (activeGame == ActiveGame.BEST_FIENDS) Color(0xFF8E24AA) else Color.DarkGray
+                    )
+                ) { Text("🐛 FIENDS", fontSize = 11.sp) }
             }
         }
 
-        // Контейнер активного экрана
         Box(modifier = Modifier.weight(1f)) {
             when (activeGame) {
                 ActiveGame.CITY -> CityScreen(activity, statusText, logs, ::log)
                 ActiveGame.CLASSIC -> ClassicScreen(activity, statusText, logs, ::log)
                 ActiveGame.PVZ2 -> Pvz2Screen(activity, statusText, logs, ::log)
+                ActiveGame.BEST_FIENDS -> BestFiendsScreen(activity, statusText, logs, ::log)
             }
         }
     }
