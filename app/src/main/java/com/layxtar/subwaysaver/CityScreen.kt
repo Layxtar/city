@@ -42,7 +42,7 @@ fun CityScreen(
 
     val undoStack = remember { mutableStateListOf<String>() }
 
-    // Валюты City
+    // Валюты City (из массива inventory)
     val cityCurrencies = remember {
         mutableStateMapOf<Long, String>().apply {
             GameDatabase.CURRENCIES.forEach { (tag, _) -> put(tag, "0") }
@@ -66,7 +66,7 @@ fun CityScreen(
     var piggyFilled by remember { mutableStateOf(true) }
     var dailyDealAmountInput by remember { mutableStateOf("9999") }
 
-    // Безопасная синхронизация UI -> JSON без поломки структуры wallet и xp!
+    // Оригинальная запись в массив inventory ("id" + "Count"), "level" и "currentSeasonId"
     fun syncStateToProfileJson(profile: JSONObject) {
         val mapToWrite = mutableMapOf<Long, Long>()
         for ((tag, strVal) in cityCurrencies) {
@@ -77,7 +77,8 @@ fun CityScreen(
         CryptoAndSyncManager.writeCityXpLevel(profile, playerXpLevel.toIntOrNull() ?: 1)
         profile.put("seasonPassPoints", (seasonPassPoints.toIntOrNull() ?: 0).coerceAtLeast(0))
         if (activeSeasonId.isNotEmpty()) {
-            profile.put("activeSeasonId", activeSeasonId)
+            profile.remove("activeSeasonId")
+            profile.put("currentSeasonId", activeSeasonId)
         }
 
         if (surferStates.isNotEmpty()) {
@@ -89,7 +90,7 @@ fun CityScreen(
         }
     }
 
-    // Безопасное чтение JSON -> UI
+    // Оригинальное чтение из массива inventory ("id" + "Count")
     fun refreshUIFromProfileJson(profile: JSONObject) {
         val mapCurr = CryptoAndSyncManager.readCityCurrencies(profile)
         GameDatabase.CURRENCIES.forEach { (tag, _) ->
@@ -98,7 +99,7 @@ fun CityScreen(
 
         playerXpLevel = CryptoAndSyncManager.readCityXpLevel(profile).toString()
         seasonPassPoints = profile.optInt("seasonPassPoints", 0).toString()
-        val curSeason = profile.optString("activeSeasonId", "")
+        val curSeason = profile.optString("currentSeasonId", profile.optString("activeSeasonId", ""))
         if (curSeason.isNotEmpty()) activeSeasonId = curSeason
 
         surferStates.clear()
@@ -292,7 +293,7 @@ fun CityScreen(
                                                     cityCurrencies[tag] = "9999999"
                                                 }
                                                 syncStateToProfileJson(innerProfile)
-                                                log("💎 Все валюты выставлены на 9 999 999!")
+                                                log("💎 Все валюты в inventory выставлены на 9 999 999!")
                                             }
                                         ) { Text("💎 Все валюты 9.9M", fontSize = 11.sp) }
 
@@ -326,7 +327,7 @@ fun CityScreen(
                                         OutlinedTextField(
                                             value = playerXpLevel,
                                             onValueChange = { playerXpLevel = it },
-                                            label = { Text("Уровень XP профиля") },
+                                            label = { Text("Уровень профиля (level)") },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                             modifier = Modifier.weight(1f)
                                         )
@@ -339,7 +340,7 @@ fun CityScreen(
                                         )
                                     }
 
-                                    Text("Активный сезон:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("Активный сезон (currentSeasonId):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                                     GameDatabase.SEASONS.forEach { (sId, sTitle) ->
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             RadioButton(
