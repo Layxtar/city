@@ -158,7 +158,6 @@ object CryptoAndSyncManager {
         val tempFile = "/data/local/tmp/ce_w_$uuid"
 
         return try {
-            // Создаём бэкап ТОЛЬКО если его ещё нет, чтобы не перезатереть чистый бэкап сломанным сохранением!
             execSh("if [ ! -f '$path.bak_editor' ]; then cp '$path' '$path.bak_editor' 2>/dev/null; fi")
             val base64 = Base64.encodeToString(data, Base64.NO_WRAP)
             var offset = 0
@@ -238,6 +237,13 @@ object CryptoAndSyncManager {
         val iv = originalRawBytes.copyOfRange(0, 16)
         val key = originalRawBytes.copyOfRange(16, 32)
 
+        // Очищаем ошибочно созданные в прошлых версиях поля, из-за которых не запускалась игра!
+        innerProfileJson.remove("wallet")
+        innerProfileJson.remove("items")
+        innerProfileJson.remove("currencies")
+        innerProfileJson.remove("xpLevel")
+        innerProfileJson.remove("activeSeasonId")
+
         val futureTime = Instant.now().plusSeconds(300)
         val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSSSSS'Z'").withZone(ZoneOffset.UTC)
         containerJson.put("lastUpdated", formatter.format(futureTime))
@@ -280,179 +286,62 @@ object CryptoAndSyncManager {
         }
     }
 
-    // ==================== БЕЗОПАСНОЕ ЧТЕНИЕ И ЗАПИСЬ ВАЛЮТ И XP В РОДНОМ ФОРМАТЕ CITY ====================
-    // Поддерживает все структуры профиля Subway Surfers City (items / wallet / currencies) без поломки сохранения!
+    // ==================== ОРИГИНАЛЬНЫЙ КОШЕЛЁК SUBWAY SURFERS CITY (МАССИВ "inventory" -> "id" + "Count") ====================
+
+    fun getCurrency(profile: JSONObject, tagId: Long): Int {
+        val inv = profile.optJSONArray("inventory") ?: return 0
+        for (i in 0 until inv.length()) {
+            val item = inv.optJSONObject(i) ?: continue
+            if (item.optLong("id") == tagId) {
+                return item.optInt("Count", item.optInt("count", 0))
+            }
+        }
+        return 0
+    }
+
+    fun setCurrency(profile: JSONObject, tagId: Long, count: Int) {
+        val inv = profile.optJSONArray("inventory") ?: JSONArray()
+        for (i in 0 until inv.length()) {
+            val item = inv.optJSONObject(i) ?: continue
+            if (item.optLong("id") == tagId) {
+                item.put("Count", count)
+                profile.put("inventory", inv)
+                return
+            }
+        }
+        inv.put(JSONObject().put("id", tagId).put("Count", count))
+        profile.put("inventory", inv)
+    }
 
     fun readCityCurrencies(profile: JSONObject): Map<Long, Long> {
         val result = mutableMapOf<Long, Long>()
-        GameDatabase.CURRENCIES.forEach { (tag, _) -> result[tag] = 0L }
-
-        // Вариант 1: массив items: [{"id": -633437229, "amount": 123}, ...] или [{"datatag": ..., "amount": ...}]
-        val itemsArr = profile.optJSONArray("items")
-        if (itemsArr != null) {
-            for (i in 0 until itemsArr.length()) {
-                val obj = itemsArr.optJSONObject(i) ?: continue
-                val id = if (obj.has("id")) obj.optLong("id") else obj.optLong("datatag", 0L)
-                if (result.containsKey(id)) {
-                    val amt = if (obj.has("amount")) obj.optLong("amount", 0L) else obj.optLong("count", 0L)
-                    result[id] = amt
-                }
-            }
+        for ((tag, _) in GameDatabase.CURRENCIES) {
+            result[tag] = getCurrency(profile, tag).toLong()
         }
-
-        // Вариант 2: объект wallet или currencies
-        val walletObj = profile.optJSONObject("wallet") ?: profile.optJSONObject("currencies")
-        if (walletObj != null) {
-            // Если внутри есть массив currencies / items
-            val subArr = walletObj.optJSONArray("currencies") ?: walletObj.optJSONArray("items")
-            if (subArr != null) {
-                for (i in 0 until subArr.length()) {
-                    val obj = subArr.optJSONObject(i) ?: continue
-                    val id = if (obj.has("id")) obj.optLong("id") else obj.optLong("datatag", 0L)
-                    if (result.containsKey(id)) {
-                        result[id] = obj.optLong("amount", obj.optLong("value", 0L))
-                    }
-                }
-            } else {
-                // Если ключи лежат напрямую в объекте wallet: {"-633437229": 12345}
-                for ((tag, _) in GameDatabase.CURRENCIES) {
-                    val keyStr = tag.toString()
-                    if (walletObj.has(keyStr)) {
-                        val v = walletObj.opt(keyStr)
-                        when (v) {
-                            is Number -> result[tag] = v.toLong()
-                            is JSONObject -> result[tag] = v.optLong("amount", v.optLong("value", 0L))
-                        }
-                    }
-                }
-            }
-        }
-
-        // Вариант 3: корневой массив currencies: [{"id": -633437229, "amount": 123}]
-        val rootCurrArr = profile.optJSONArray("currencies")
-        if (rootCurrArr != null) {
-            for (i in 0 until rootCurrArr.length()) {
-                val obj = rootCurrArr.optJSONObject(i) ?: continue
-                val id = if (obj.has("id")) obj.optLong("id") else obj.optLong("datatag", 0L)
-                if (result.containsKey(id)) {
-                    result[id] = obj.optLong("amount", obj.optLong("value", 0L))
-                }
-            }
-        }
-
         return result
     }
 
     fun writeCityCurrencies(profile: JSONObject, newValues: Map<Long, Long>) {
-        var writtenSomewhere = false
+        // Удаляем мусорные поля, если они остались с прошлого запуска
+        profile.remove("wallet")
+        profile.remove("items")
+        profile.remove("currencies")
 
-        // 1. Если в профиле есть массив items — обновляем или добавляем туда
-        val itemsArr = profile.optJSONArray("items")
-        if (itemsArr != null) {
-            val foundTags = mutableSetOf<Long>()
-            val idKeyName = if (itemsArr.length() > 0 && itemsArr.optJSONObject(0)?.has("datatag") == true) "datatag" else "id"
-            val amtKeyName = if (itemsArr.length() > 0 && itemsArr.optJSONObject(0)?.has("count") == true) "count" else "amount"
-
-            for (i in 0 until itemsArr.length()) {
-                val obj = itemsArr.optJSONObject(i) ?: continue
-                val id = obj.optLong(idKeyName, 0L)
-                val targetVal = newValues[id]
-                if (targetVal != null) {
-                    obj.put(amtKeyName, targetVal)
-                    foundTags.add(id)
-                }
-            }
-            for ((tag, amt) in newValues) {
-                if (!foundTags.contains(tag)) {
-                    itemsArr.put(JSONObject().put(idKeyName, tag).put(amtKeyName, amt))
-                }
-            }
-            writtenSomewhere = true
-        }
-
-        // 2. Если в профиле есть корневой массив currencies — обновляем его
-        val rootCurrArr = profile.optJSONArray("currencies")
-        if (rootCurrArr != null) {
-            val foundTags = mutableSetOf<Long>()
-            for (i in 0 until rootCurrArr.length()) {
-                val obj = rootCurrArr.optJSONObject(i) ?: continue
-                val id = obj.optLong("id", 0L)
-                val targetVal = newValues[id]
-                if (targetVal != null) {
-                    obj.put("amount", targetVal)
-                    foundTags.add(id)
-                }
-            }
-            for ((tag, amt) in newValues) {
-                if (!foundTags.contains(tag)) {
-                    rootCurrArr.put(JSONObject().put("id", tag).put("amount", amt))
-                }
-            }
-            writtenSomewhere = true
-        }
-
-        // 3. Если в профиле есть объект wallet — обновляем СТРОГО в том виде, в котором он уже существует в профиле!
-        val walletObj = profile.optJSONObject("wallet")
-        if (walletObj != null) {
-            val subArr = walletObj.optJSONArray("currencies") ?: walletObj.optJSONArray("items")
-            if (subArr != null) {
-                val foundTags = mutableSetOf<Long>()
-                for (i in 0 until subArr.length()) {
-                    val obj = subArr.optJSONObject(i) ?: continue
-                    val id = obj.optLong("id", 0L)
-                    val targetVal = newValues[id]
-                    if (targetVal != null) {
-                        obj.put("amount", targetVal)
-                        foundTags.add(id)
-                    }
-                }
-                for ((tag, amt) in newValues) {
-                    if (!foundTags.contains(tag)) {
-                        subArr.put(JSONObject().put("id", tag).put("amount", amt))
-                    }
-                }
-            } else {
-                // Прямой словарь {"-633437229": 999999}
-                for ((tag, amt) in newValues) {
-                    val k = tag.toString()
-                    val existing = walletObj.opt(k)
-                    if (existing is JSONObject) {
-                        if (existing.has("amount")) existing.put("amount", amt)
-                        else existing.put("value", amt)
-                    } else {
-                        walletObj.put(k, amt)
-                    }
-                }
-            }
-            writtenSomewhere = true
-        }
-
-        // Если ни одного из полей ещё не было — создаём стандартный массив items
-        if (!writtenSomewhere) {
-            val newItems = JSONArray()
-            for ((tag, amt) in newValues) {
-                newItems.put(JSONObject().put("id", tag).put("amount", amt))
-            }
-            profile.put("items", newItems)
+        for ((tag, amt) in newValues) {
+            val safeInt = amt.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+            setCurrency(profile, tag, safeInt)
         }
     }
 
     fun readCityXpLevel(profile: JSONObject): Int {
-        val xpObj = profile.optJSONObject("xp")
-        if (xpObj != null && xpObj.has("level")) {
-            return xpObj.optInt("level", 1)
-        }
-        return profile.optInt("xpLevel", profile.optInt("playerLevel", 1))
+        return profile.optInt("level", 1).coerceAtLeast(1)
     }
 
     fun writeCityXpLevel(profile: JSONObject, level: Int) {
-        val xpObj = profile.optJSONObject("xp")
-        if (xpObj != null) {
-            xpObj.put("level", level.coerceAtLeast(1))
-        } else if (profile.has("xpLevel")) {
-            profile.put("xpLevel", level.coerceAtLeast(1))
-        } else {
-            profile.put("xp", JSONObject().put("level", level.coerceAtLeast(1)).put("xp", 0))
+        profile.remove("xpLevel")
+        profile.put("level", level.coerceAtLeast(1))
+        if (!profile.has("xp") || profile.opt("xp") !is Number) {
+            profile.put("xp", 500)
         }
     }
 
@@ -601,7 +490,7 @@ object CryptoAndSyncManager {
         profile.put("avatarProfiles", avatarsArray)
     }
 
-    // ==================== УПРАВЛЕНИЕ РАЙОНАМИ (ТРАССАМИ 1..6) И ТРИАЛАМИ ПО ВЫБОРУ (БЕЗ ДУБЛИКАТОВ ТИПОВ) ====================
+    // ==================== УПРАВЛЕНИЕ РАЙОНАМИ (ТРАССАМИ 1..6) И ТРИАЛАМИ ПО ВЫБОРУ ====================
 
     fun completeAllDistrictsAndStages(profile: JSONObject) {
         for (num in 1..6) {
@@ -635,10 +524,9 @@ object CryptoAndSyncManager {
         val maxStage = stageCounts[districtNum] ?: 36
 
         val distProf = profile.optJSONArray("districtProfiles") ?: JSONArray()
-        // Определяем, какой тип id использует игра в districtProfiles (число или строку), чтобы не создавать дубликаты!
         val usesNumericId = if (distProf.length() > 0) {
             distProf.optJSONObject(0)?.opt("id") is Number
-        } else true
+        } else false
 
         val newDistProf = JSONArray()
         var found = false
