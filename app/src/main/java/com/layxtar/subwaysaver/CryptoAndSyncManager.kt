@@ -207,50 +207,73 @@ object CryptoAndSyncManager {
     }
 
     // Безотказный каскадный запуск любой игры через Shizuku (3 независимых метода в shell + Intent fallback)
-    fun launchGame(context: Context, packageName: String = PKG_CITY, log: (String) -> Unit) {
+        fun launchGame(context: Context, packageName: String = PKG_CITY, log: (String) -> Unit) {
         log("🚀 Запускаем $packageName...")
 
-        // Метод 1: Вычисляем точный компонент Activity через cmd package resolve-activity и запускаем без лишних флагов
-        val (_, resolveOut) = execSh(
-            "cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER $packageName 2>/dev/null | grep '/' | tail -n 1"
-        )
-        val component = resolveOut.trim().replace("\r", "").replace("\n", "")
-        if (component.contains("/")) {
-            val (code, startOut) = execSh("am start -n '$component' 2>&1")
-            if (code == 0 && !startOut.contains("Error", ignoreCase = true)) {
-                log("✅ Игра запущена ($component)")
+        // 1. Проверяем точное имя пакета (если клон или региональная версия — находим автоматически)
+        var targetPkg = packageName
+        val (_, pkgCheck) = execSh("pm path $targetPkg 2>/dev/null")
+        if (pkgCheck.isBlank()) {
+            val keyword = when {
+                packageName.contains("bestfiends", ignoreCase = true) -> "fiends"
+                packageName.contains("brim", ignoreCase = true) -> "brim"
+                packageName.contains("pvz2", ignoreCase = true) -> "pvz2"
+                packageName.contains("kiloo", ignoreCase = true) -> "subwaysurf"
+                else -> "subway"
+            }
+            val (_, foundPkg) = execSh("pm list packages 2>/dev/null | grep -i '$keyword' | head -n 1 | cut -d ':' -f 2")
+            val cleanFound = foundPkg.trim()
+            if (cleanFound.isNotEmpty()) {
+                targetPkg = cleanFound
+            }
+        }
+
+        // 2. Способ 1: Чистый resolve-activity без флага -a (работает на всех Android 10-15)
+        val (_, resolveOut) = execSh("cmd package resolve-activity --brief $targetPkg 2>/dev/null | grep '/' | tail -n 1")
+        val comp1 = resolveOut.trim()
+        if (comp1.contains("/")) {
+            val (code, out) = execSh("am start --user 0 -n '$comp1' 2>&1")
+            if (code == 0 && !out.contains("Error", ignoreCase = true)) {
+                log("✅ Игра запущена ($comp1)")
                 return
             }
         }
 
-        // Метод 2: Запуск через monkey
-        val (monkeyCode, monkeyOut) = execSh("monkey -p $packageName -c android.intent.category.LAUNCHER 1 2>&1")
-        if (monkeyCode == 0 && !monkeyOut.contains("No activities found", ignoreCase = true)) {
-            log("✅ Игра запущена!")
+        // 3. Способ 2: Поиск главной Activity через dumpsys package
+        val (_, dumpOut) = execSh(
+            "dumpsys package $targetPkg 2>/dev/null | grep -E ' [a-zA-Z0-9_.]+/[a-zA-Z0-9_.\$]+' | grep -v 'ContentProvider' | grep -v 'Receiver' | grep -v 'Service' | head -n 1 | tr -s ' ' | cut -d ' ' -f 3"
+        )
+        val comp2 = dumpOut.trim()
+        if (comp2.contains("/")) {
+            val (code, out) = execSh("am start --user 0 -n '$comp2' 2>&1")
+            if (code == 0 && !out.contains("Error", ignoreCase = true)) {
+                log("✅ Игра запущена ($comp2)")
+                return
+            }
+        }
+
+        // 4. Способ 3: Запуск через monkey без лишних фильтров
+        val (mCode, mOut) = execSh("monkey -p $targetPkg 1 2>&1")
+        if (mCode == 0 && !mOut.contains("No activities found", ignoreCase = true) && !mOut.contains("aborted", ignoreCase = true)) {
+            log("✅ Игра запущена через monkey!")
             return
         }
 
-        // Метод 3: Прямой am start по пакету
-        val (amCode, amOut) = execSh("am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p $packageName 2>&1")
-        if (amCode == 0 && !amOut.contains("Error", ignoreCase = true)) {
-            log("✅ Игра запущена!")
-            return
-        }
-
-        // Метод 4: Стандартный Android PackageManager
+        // 5. Способ 4: Через стандартный Intent
         try {
-            val intent = context.packageManager?.getLaunchIntentForPackage(packageName)
+            val intent = context.packageManager?.getLaunchIntentForPackage(targetPkg)
             if (intent != null) {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(intent)
-                log("✅ Игра запущена через систему!")
+                log("✅ Игра запущена!")
             } else {
-                log("⚠️ Игра ($packageName) не найдена на устройстве!")
+                log("⚠️ Не удалось запустить $targetPkg. Проверь, установлена ли игра.")
             }
         } catch (e: Exception) {
-            log("❌ Ошибка запуска: ${e.message}")
+            log("❌ Ошибка старта: ${e.message}")
         }
     }
+
 
     fun restoreBackup(path: String, log: (String) -> Unit): Boolean {
         stopGameForSync(PKG_CITY, true, log)
