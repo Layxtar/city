@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,6 +42,7 @@ fun MultiGameEditorRoot(activity: ComponentActivity) {
     var activeGame by remember { mutableStateOf(ActiveGame.CITY) }
     var statusText by remember { mutableStateOf("🔄 Готов к работе...") }
     var logs by remember { mutableStateOf("🚀 Старт модульного редактора...\n") }
+    val stateHolder = rememberSaveableStateHolder()
 
     fun log(msg: String) {
         statusText = msg
@@ -94,11 +96,13 @@ fun MultiGameEditorRoot(activity: ComponentActivity) {
         }
 
         Box(modifier = Modifier.weight(1f)) {
-            when (activeGame) {
-                ActiveGame.CITY -> CityScreen(activity, statusText, logs, ::log)
-                ActiveGame.CLASSIC -> ClassicScreen(activity, statusText, logs, ::log)
-                ActiveGame.PVZ2 -> Pvz2Screen(activity, statusText, logs, ::log)
-                ActiveGame.BEST_FIENDS -> BestFiendsScreen(activity, statusText, logs, ::log)
+            stateHolder.SaveableStateProvider(activeGame.name) {
+                when (activeGame) {
+                    ActiveGame.CITY -> CityScreen(activity, statusText, logs, ::log)
+                    ActiveGame.CLASSIC -> ClassicScreen(activity, statusText, logs, ::log)
+                    ActiveGame.PVZ2 -> Pvz2Screen(activity, statusText, logs, ::log)
+                    ActiveGame.BEST_FIENDS -> BestFiendsScreen(activity, statusText, logs, ::log)
+                }
             }
         }
     }
