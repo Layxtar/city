@@ -16,7 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-enum class ActiveGame { CITY, CLASSIC, PVZ2, BEST_FIENDS }
+enum class ActiveGame { CITY, CLASSIC, PVZ2, BEST_FIENDS, BRIM }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -41,10 +41,9 @@ class MainActivity : ComponentActivity() {
 fun MultiGameEditorRoot(activity: ComponentActivity) {
     var activeGame by remember { mutableStateOf(ActiveGame.CITY) }
     var statusText by remember { mutableStateOf("🔄 Готов к работе...") }
-    var logs by remember { mutableStateOf("🚀 Старт модульного редактора...\n") }
+    var logs by remember { mutableStateOf("🚀 Старт модульного редактора (5 игр)...\n") }
     val stateHolder = rememberSaveableStateHolder()
 
-    // Потокобезопасное обновление стейта Compose из любого фонового потока (Dispatchers.IO)
     fun log(msg: String) {
         activity.runOnUiThread {
             statusText = msg
@@ -95,6 +94,14 @@ fun MultiGameEditorRoot(activity: ComponentActivity) {
                         containerColor = if (activeGame == ActiveGame.BEST_FIENDS) Color(0xFF8E24AA) else Color.DarkGray
                     )
                 ) { Text("🐛 FIENDS", fontSize = 11.sp) }
+
+                Button(
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    onClick = { activeGame = ActiveGame.BRIM },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (activeGame == ActiveGame.BRIM) Color(0xFF00897B) else Color.DarkGray
+                    )
+                ) { Text("⚔️ BRIM", fontSize = 11.sp) }
             }
         }
 
@@ -105,6 +112,7 @@ fun MultiGameEditorRoot(activity: ComponentActivity) {
                     ActiveGame.CLASSIC -> ClassicScreen(activity, statusText, logs, ::log)
                     ActiveGame.PVZ2 -> Pvz2Screen(activity, statusText, logs, ::log)
                     ActiveGame.BEST_FIENDS -> BestFiendsScreen(activity, statusText, logs, ::log)
+                    ActiveGame.BRIM -> BrimScreen(activity, statusText, logs, ::log)
                 }
             }
         }
