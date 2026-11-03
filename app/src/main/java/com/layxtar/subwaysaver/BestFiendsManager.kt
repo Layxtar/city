@@ -6,21 +6,21 @@ import org.json.JSONObject
 object BestFiendsManager {
 
     private val dir get() = BestFiendsDatabase.GAME_SETTINGS_DIR
+    private const val METADATA_PATH =
+        "/storage/emulated/0/Android/data/${BestFiendsDatabase.PKG_BEST_FIENDS}/files/il2cpp/Metadata/global-metadata.dat"
 
-    // Разблокировка прав перед записью наших модов
     fun unlockPermissionsForWrite(log: (String) -> Unit) {
         CryptoAndSyncManager.execSh("chattr -R -i '$dir' 2>/dev/null")
         CryptoAndSyncManager.execSh("chmod 777 '$dir' 2>/dev/null")
         CryptoAndSyncManager.execSh("chmod 666 '$dir'/*.json 2>/dev/null")
     }
 
-    // Жесткая заморозка папки GameSettings (Только чтение), чтобы игра не сбрасывала файлы при запуске!
     fun lockSettingsReadOnly(lock: Boolean, log: (String) -> Unit) {
         if (lock) {
             CryptoAndSyncManager.execSh("chmod 444 '$dir'/*.json 2>/dev/null")
             CryptoAndSyncManager.execSh("chmod 555 '$dir' 2>/dev/null")
             CryptoAndSyncManager.execSh("chattr +i '$dir'/*.json 2>/dev/null")
-            log("🔒 Файлы GameSettings заморожены (Read-Only 444)! Игра не сможет их перезаписать.")
+            log("🔒 Файлы GameSettings заморожены (Read-Only 444)! Игра не сможет их сбросить.")
         } else {
             unlockPermissionsForWrite(log)
             log("🔓 Защита Read-Only снята (права 777 восстановлены).")
@@ -44,7 +44,6 @@ object BestFiendsManager {
         }
         unlockPermissionsForWrite(log)
 
-        // Всегда обнуляем CachedSettingsHashes.json
         val hashesObj = JSONObject()
         for (k in BestFiendsDatabase.HASH_KEYS) {
             hashesObj.put(k, JSONObject.NULL)
@@ -76,10 +75,14 @@ object BestFiendsManager {
                     cp "${'$'}f" "${'$'}orig"
                 fi
             done
+            if [ -f '$METADATA_PATH.bak_editor' ]; then
+                chmod 666 '$METADATA_PATH' 2>/dev/null
+                cp '$METADATA_PATH.bak_editor' '$METADATA_PATH'
+            fi
             sync
         """.trimIndent()
         CryptoAndSyncManager.execSh(cmd, log)
-        log("⏪ Оригинальные конфиги Best Fiends восстановлены из бэкапов!")
+        log("⏪ Оригинальные конфиги и global-metadata.dat восстановлены из бэкапов!")
     }
 
     private fun makeSku(skuId: Int, amount: Int, debugName: String): JSONObject {
@@ -163,7 +166,7 @@ object BestFiendsManager {
         })
 
         val ok = writeSettingJson("shops.json", root.toString(), !hotSwapMode, autoLock, log)
-        if (ok) log("🐛 Магазин донатных букашек за 1 Золото установлен! (Вкладка Ключи = по цветам, Энергия/VIP = по 1 шт.)")
+        if (ok) log("🐛 Магазин донатных букашек за 1 Золото установлен!")
         return ok
     }
 
@@ -195,12 +198,6 @@ object BestFiendsManager {
             put(makeOffer("IncreaseCapEnergy", costKeys, oneEnergyGain))
         }
 
-        // В магазине ключей:
-        // 1-й пак списывает Жёлтые метеоры
-        // 2-й пак списывает Синие метеоры
-        // 3-й пак списывает Ключи
-        // 4-й пак списывает Золото
-        // 5-й пак списывает половину Жёлтых метеоров
         val keyOffers = JSONArray().apply {
             put(makeOffer("SmallKeyPack", costYellow, oneKeyGain))
             put(makeOffer("MediumKeyPack", costBlue, oneKeyGain))
@@ -301,11 +298,11 @@ object BestFiendsManager {
         })
 
         val ok = writeSettingJson("shops.json", root.toString(), !hotSwapMode, autoLock, log)
-        if (ok) log("💎 Мега-Магазин ресурсов установлен (Пак 1 = Золото, Пак 2 = Ключи, Пак 3 = Жёлтые метеоры, Пак 4 = Синие метеоры)!")
+        if (ok) log("💎 Мега-Магазин ресурсов установлен!")
         return ok
     }
 
-    // ==================== 4. СУНДУКИ (GACHA): ВСЕ ДОНАТНЫЕ ПЕРСОНАЖИ + ВСЕ СКИНЫ (СТРОГО ПО 1 В БЛОКЕ!) ====================
+    // ==================== 4. СУНДУКИ (GACHA): ВСЕ ДОНАТНЫЕ ПЕРСОНАЖИ + ВСЕ СКИНЫ ====================
 
     fun installAllFiendsAndSkinsGacha(
         maxStyleId: Int = 9,
@@ -323,17 +320,12 @@ object BestFiendsManager {
             })
         }
 
-        // 1. Сначала все 19 донатных персонажей (styleId = 0)
         for (donateFiend in BestFiendsDatabase.ALL_DONATE_FIENDS) {
             addSingleGachaBlock(donateFiend, 0)
         }
-
-        // 2. Все стандартные персонажи (styleId = 0)
         for (stdFiend in BestFiendsDatabase.STANDARD_FIENDS) {
             addSingleGachaBlock(stdFiend, 0)
         }
-
-        // 3. Все скины (styleId от 1 до maxStyleId) для всех цветов (1..12)
         for (style in 1..maxStyleId) {
             for (color in BestFiendsDatabase.COLORS) {
                 for (num in 1..12) {
@@ -352,11 +344,11 @@ object BestFiendsManager {
         })
 
         val ok = writeSettingJson("gachaLevelsFiends.json", root.toString(), !hotSwapMode, autoLock, log)
-        if (ok) log("🎁 В сундуки (gachaLevelsFiends.json) записано ${levelsRangeConfigs.length()} отдельных блоков (все донатные букашки + все скины 1..$maxStyleId) со 100% шансом!")
+        if (ok) log("🎁 В сундуки записано ${levelsRangeConfigs.length()} отдельных блоков (все букашки + все скины 1..$maxStyleId)!")
         return ok
     }
 
-    // ==================== 5. ОСТАЛЬНЫЕ МОДЫ (FIENDEX ЗА 0, БУСТЕРЫ 999, АВТО-ПОБЕДА, СНЯТИЕ ВОРОТ) ====================
+    // ==================== 5. ГЕЙМПЛЕЙНЫЕ МОДЫ (FIENDEX, БУСТЕРЫ, ДИНАМИЧЕСКАЯ СЛОЖНОСТЬ, БАТТЛ-ПАСС, КОЛЕСО, БЕЗ РЕКЛАМЫ) ====================
 
     fun installFreeFiendexAndBoosters(
         hotSwapMode: Boolean,
@@ -398,7 +390,6 @@ object BestFiendsManager {
             put("segmentId", JSONObject.NULL)
         })
 
-        // Бустеры по 999 штук за 0 золота
         fun boosterOffers(skuId: Int, debugName: String): JSONArray {
             val arr = JSONArray()
             repeat(3) {
@@ -440,12 +431,12 @@ object BestFiendsManager {
         return ok1 && ok2
     }
 
+    // Авто-победа с 1-й попытки (+50 ходов со старта, ослабление слизней на 95%, снятие ворот на карте)
     fun installEasyWinAndRemoveGates(
         hotSwapMode: Boolean,
         autoLock: Boolean,
         log: (String) -> Unit
     ): Boolean {
-        // 1. +50 ходов за 0 золота при проигрыше (outOfMoves.json)
         val oomSettings = JSONArray()
         for (ord in 1..4) {
             oomSettings.put(JSONObject().apply {
@@ -463,7 +454,6 @@ object BestFiendsManager {
             put("segmentId", JSONObject.NULL)
         })
 
-        // 2. Снятие ворот на карте (storyMapGates.json)
         val gatesArr = JSONArray().put(JSONObject().put("level", 10).put("minFiendLevel", 1).put("minFiendAmount", 1).put("isHidden", true))
         val gatesRoot = JSONArray().put(JSONObject().apply {
             put("configHash", JSONObject.NULL)
@@ -474,9 +464,214 @@ object BestFiendsManager {
             put("segmentId", JSONObject.NULL)
         })
 
+        // Динамическая сложность: сразу даёт +50 ходов и снижает ХП слизней до 5% с 0-й попытки (без проигрышей!)
+        val dynAdjustments = JSONArray().put(JSONObject().apply {
+            put("attemptsRequired", 0)
+            put("extraMoves", 50)
+            put("slugHealthMultiplier", 0.05)
+            put("converterDropRateMultiplier", 10.0)
+            put("bombChargeMultiplier", 10.0)
+        })
+        val dynConfig = JSONObject().apply {
+            put("isEnabled", true)
+            put("minLevel", 1)
+            put("adjustments", dynAdjustments)
+            put("levels", dynAdjustments)
+        }
+        val dynRoot = JSONArray().put(JSONObject().apply {
+            put("configHash", JSONObject.NULL)
+            put("configuration", dynConfig)
+            put("featureId", "dynamicDifficulty")
+            put("startTimeSec", JSONObject.NULL)
+            put("endTimeSec", JSONObject.NULL)
+            put("segmentId", JSONObject.NULL)
+        })
+        val dynSimpleRoot = JSONArray().put(JSONObject().apply {
+            put("configHash", JSONObject.NULL)
+            put("configuration", dynConfig)
+            put("featureId", "dynamicDifficultySimpleLevels")
+            put("startTimeSec", JSONObject.NULL)
+            put("endTimeSec", JSONObject.NULL)
+            put("segmentId", JSONObject.NULL)
+        })
+
         val ok1 = writeSettingJson("outOfMoves.json", oomRoot.toString(), !hotSwapMode, false, log)
-        val ok2 = writeSettingJson("storyMapGates.json", gatesRoot.toString(), false, autoLock, log)
-        if (ok1 && ok2) log("⚔️ Ворота на карте убраны, а продолжение при проигрыше даёт +50 ходов за 0 золота!")
+        val ok2 = writeSettingJson("storyMapGates.json", gatesRoot.toString(), false, false, log)
+        val ok3 = writeSettingJson("dynamicDifficulty.json", dynRoot.toString(), false, false, log)
+        val ok4 = writeSettingJson("dynamicDifficultySimpleLevels.json", dynSimpleRoot.toString(), false, autoLock, log)
+        if (ok1 && ok2 && ok3 && ok4) {
+            log("⚔️ Авто-победа (dynamicDifficulty: +50 ходов с 1-й попытки, -95% ХП слизней) и снятие ворот установлены!")
+        }
+        return ok1 && ok2 && ok3 && ok4
+    }
+
+    // Джекпоты Колеса Фортуны (womfRewards.json), Боевого Пропуска (battlePassConfig.json) и Наград за уровни (levelRewards.json)
+    fun installWheelBattlePassAndLevelJackpots(
+        hotSwapMode: Boolean,
+        autoLock: Boolean,
+        log: (String) -> Unit
+    ): Boolean {
+        val megaJackpotSkus = JSONArray().apply {
+            put(makeSku(BestFiendsDatabase.SKU_GOLD, 10000, "Gold"))
+            put(makeSku(BestFiendsDatabase.SKU_KEYS, 500, "Keys"))
+            put(makeSku(BestFiendsDatabase.SKU_VIP_HOURS, 168, "Vip Hours"))
+            put(makeSku(BestFiendsDatabase.SKU_UNLIMITED_ENERGY_HOURS, 168, "Unlimited Energy Hours"))
+        }
+
+        // 1. Колесо Фортуны (womfRewards.json + mcettWheelFallback.json)
+        val wheelSlices = JSONArray()
+        for (i in 0 until 8) {
+            wheelSlices.put(JSONObject().apply {
+                put("sliceIndex", i)
+                put("weight", 100)
+                put("reward", JSONObject().put("skus", megaJackpotSkus))
+            })
+        }
+        val womfRoot = JSONArray().put(JSONObject().apply {
+            put("configHash", JSONObject.NULL)
+            put("configuration", JSONObject().put("slices", wheelSlices).put("rewards", wheelSlices))
+            put("featureId", "womfRewards")
+            put("startTimeSec", JSONObject.NULL)
+            put("endTimeSec", JSONObject.NULL)
+            put("segmentId", JSONObject.NULL)
+        })
+
+        // 2. Боевой пропуск за 1 очко на ярус (battlePassConfig.json)
+        val bpTiers = JSONArray()
+        for (tier in 1..35) {
+            bpTiers.put(JSONObject().apply {
+                put("tier", tier)
+                put("pointsRequired", 1)
+                put("freeReward", JSONObject().put("skus", megaJackpotSkus))
+                put("premiumReward", JSONObject().put("skus", megaJackpotSkus))
+            })
+        }
+        val bpRoot = JSONArray().put(JSONObject().apply {
+            put("configHash", JSONObject.NULL)
+            put("configuration", JSONObject().apply {
+                put("pointsPerLevel", 100)
+                put("tiers", bpTiers)
+            })
+            put("featureId", "battlePassConfig")
+            put("startTimeSec", JSONObject.NULL)
+            put("endTimeSec", JSONObject.NULL)
+            put("segmentId", JSONObject.NULL)
+        })
+
+        // 3. Награды за прохождение обычных и Героических уровней (levelRewards.json + heroLevelsRewards.json)
+        val lvlRewardRoot = JSONArray().put(JSONObject().apply {
+            put("configHash", JSONObject.NULL)
+            put("configuration", JSONObject().apply {
+                put("defaultReward", JSONObject().put("skus", megaJackpotSkus))
+                put("firstTimeReward", JSONObject().put("skus", megaJackpotSkus))
+            })
+            put("featureId", "levelRewards")
+            put("startTimeSec", JSONObject.NULL)
+            put("endTimeSec", JSONObject.NULL)
+            put("segmentId", JSONObject.NULL)
+        })
+
+        val ok1 = writeSettingJson("womfRewards.json", womfRoot.toString(), !hotSwapMode, false, log)
+        val ok2 = writeSettingJson("battlePassConfig.json", bpRoot.toString(), false, false, log)
+        val ok3 = writeSettingJson("levelRewards.json", lvlRewardRoot.toString(), false, autoLock, log)
+        if (ok1 && ok2 && ok3) {
+            log("🎡 Джекпоты Колеса Фортуны (10 000🪙 + 500🔑), Боевой Пропуск (по 1 очку) и Награды за уровни установлены!")
+        }
+        return ok1 && ok2 && ok3
+    }
+
+    // Полное отключение рекламы (ads.json + opportunisticAdPopup.json)
+    fun disableAllAdsInGame(
+        hotSwapMode: Boolean,
+        autoLock: Boolean,
+        log: (String) -> Unit
+    ): Boolean {
+        val adsRoot = JSONArray().put(JSONObject().apply {
+            put("configHash", JSONObject.NULL)
+            put("configuration", JSONObject().apply {
+                put("adsEnabled", false)
+                put("interstitialAdsEnabled", false)
+                put("rewardedAdsEnabled", false)
+                put("minLevelForAds", 99999)
+                put("cooldownSeconds", 9999999)
+            })
+            put("featureId", "ads")
+            put("startTimeSec", JSONObject.NULL)
+            put("endTimeSec", JSONObject.NULL)
+            put("segmentId", JSONObject.NULL)
+        })
+
+        val popupRoot = JSONArray().put(JSONObject().apply {
+            put("configHash", JSONObject.NULL)
+            put("configuration", JSONObject().put("isEnabled", false).put("minLevel", 99999))
+            put("featureId", "opportunisticAdPopup")
+            put("startTimeSec", JSONObject.NULL)
+            put("endTimeSec", JSONObject.NULL)
+            put("segmentId", JSONObject.NULL)
+        })
+
+        val ok1 = writeSettingJson("ads.json", adsRoot.toString(), !hotSwapMode, false, log)
+        val ok2 = writeSettingJson("opportunisticAdPopup.json", popupRoot.toString(), false, autoLock, log)
+        if (ok1 && ok2) log("🚫 Вся реклама в Best Fiends отключена (ads.json + opportunisticAdPopup.json)!")
         return ok1 && ok2
+    }
+
+    // ==================== 6. ПАТЧЕР И СКАНЕР GLOBAL-METADATA.DAT (IL2CPP) ====================
+
+    // Подменяет в global-metadata.dat "https://" на "http://0" (ровно 8 байт в 8 байт без смещения таблицы оффсетов!),
+    // чтобы игра не могла скачать с сервера свежие хеши конфигов и перезаписать папку GameSettings!
+    fun patchGlobalMetadataKillConfigSync(log: (String) -> Unit): Boolean {
+        CryptoAndSyncManager.stopGameForSync(BestFiendsDatabase.PKG_BEST_FIENDS, true, log)
+        CryptoAndSyncManager.execSh("chmod 666 '$METADATA_PATH' 2>/dev/null")
+        val raw = CryptoAndSyncManager.readFileViaShizuku(METADATA_PATH, log) ?: run {
+            log("❌ Файл global-metadata.dat не найден по пути: $METADATA_PATH")
+            return false
+        }
+
+        val target = "https://".toByteArray(Charsets.US_ASCII)
+        val replacement = "http://0".toByteArray(Charsets.US_ASCII) // Строго 8 байт!
+        var patchedCount = 0
+
+        var i = 0
+        while (i <= raw.size - target.size) {
+            var match = true
+            for (j in target.indices) {
+                if (raw[i + j] != target[j]) {
+                    match = false
+                    break
+                }
+            }
+            if (match) {
+                for (j in replacement.indices) {
+                    raw[i + j] = replacement[j]
+                }
+                patchedCount++
+                i += target.size
+            } else {
+                i++
+            }
+        }
+
+        if (patchedCount == 0) {
+            log("ℹ️ В global-metadata.dat уже заблокированы все https:// ссылки.")
+            return true
+        }
+
+        val ok = CryptoAndSyncManager.writeFileViaShizuku(METADATA_PATH, raw, log)
+        if (ok) {
+            CryptoAndSyncManager.execSh("chmod 444 '$METADATA_PATH' 2>/dev/null")
+            log("🛡️ global-metadata.dat пропатчен (заблокировано $patchedCount https-ссылок синхронизации хешей)!")
+        }
+        return ok
+    }
+
+    // Авто-сканер новых букашек внутри global-metadata.dat
+    fun scanGlobalMetadataForFiendIds(log: (String) -> Unit): List<String> {
+        val raw = CryptoAndSyncManager.readFileViaShizuku(METADATA_PATH, log) ?: return emptyList()
+        val text = String(raw, Charsets.ISO_8859_1)
+        val regex = Regex("\\b(Green|Yellow|Blue|Purple|Red)([1-9][0-9]?)\\b")
+        val found = regex.findAll(text).map { it.value }.distinct().sorted().toList()
+        log("🔍 В global-metadata.dat найдено ${found.size} уникальных ID букашек: ${found.joinToString(", ")}")
+        return found
     }
 }
