@@ -21,7 +21,6 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 
 @Composable
@@ -47,74 +46,57 @@ fun CityScreen(
         }
     }
 
-    // Сёрферы, скины и доски
     val surferStates = remember { mutableStateListOf<CitySurferState>() }
     val unlockedSkinTags = remember { mutableStateListOf<Long>() }
     val boardStates = remember { mutableStateListOf<CityBoardState>() }
     var expandedSurferId by remember { mutableStateOf<Long?>(null) }
     var searchQuery by remember { mutableStateOf("") }
 
-    // Редактор цветного никнейма Unity
     var playerNameInput by remember { mutableStateOf("") }
     var colorStartHex by remember { mutableStateOf("FF0055") }
     var colorEndHex by remember { mutableStateOf("00E5FF") }
-
-    // Сырой JSON-инспектор
     var rawJsonKeySearch by remember { mutableStateOf("") }
 
     fun syncStateFromJson(inner: JSONObject) {
-        val walletArr = inner.optJSONArray("wallet") ?: JSONArray()
-        val map = mutableMapOf<Long, Long>()
-        for (i in 0 until walletArr.length()) {
-            val w = walletArr.getJSONObject(i)
-            map[w.getLong("id")] = w.optLong("amount", 0L)
+        try {
+            val map = CryptoAndSyncManager.readCityCurrencies(inner)
+            GameDatabase.CURRENCIES.forEach { (tag, _) ->
+                currencies[tag] = (map[tag] ?: 0L).toString()
+            }
+
+            surferStates.clear()
+            surferStates.addAll(CryptoAndSyncManager.parseCitySurfers(inner))
+
+            unlockedSkinTags.clear()
+            unlockedSkinTags.addAll(CryptoAndSyncManager.parseUnlockedCitySkins(inner))
+
+            boardStates.clear()
+            boardStates.addAll(CryptoAndSyncManager.parseCityBoards(inner))
+
+            val onlineProf = inner.optJSONObject("onlinePlayerProfile")
+            playerNameInput = onlineProf?.optString("playerName", "") ?: ""
+            uiTrigger++
+        } catch (e: Exception) {
+            log("⚠️ Предупреждение разбора профиля City: ${e.message}")
         }
-        GameDatabase.CURRENCIES.forEach { (tag, _) ->
-            currencies[tag] = (map[tag] ?: 0L).toString()
-        }
-
-        surferStates.clear()
-        surferStates.addAll(CryptoAndSyncManager.parseCitySurfers(inner))
-
-        unlockedSkinTags.clear()
-        unlockedSkinTags.addAll(CryptoAndSyncManager.parseUnlockedCitySkins(inner))
-
-        boardStates.clear()
-        boardStates.addAll(CryptoAndSyncManager.parseCityBoards(inner))
-
-        val onlineProf = inner.optJSONObject("onlinePlayerProfile")
-        playerNameInput = onlineProf?.optString("playerName", "") ?: ""
-        uiTrigger++
     }
 
     fun applyUiToInnerJson(inner: JSONObject) {
-        val walletArr = inner.optJSONArray("wallet") ?: JSONArray()
-        val existing = mutableMapOf<Long, JSONObject>()
-        for (i in 0 until walletArr.length()) {
-            val obj = walletArr.getJSONObject(i)
-            existing[obj.getLong("id")] = obj
-        }
-        for ((tag, strVal) in currencies) {
-            val amt = strVal.toLongOrNull() ?: 0L
-            val obj = existing[tag]
-            if (obj != null) {
-                obj.put("amount", amt)
-            } else {
-                val newObj = JSONObject().put("id", tag).put("amount", amt)
-                walletArr.put(newObj)
+        try {
+            val newMap = currencies.mapValues { it.value.toLongOrNull() ?: 0L }
+            CryptoAndSyncManager.writeCityCurrencies(inner, newMap)
+            CryptoAndSyncManager.applyCitySurfers(inner, surferStates)
+            CryptoAndSyncManager.applyUnlockedCitySkins(inner, unlockedSkinTags.toSet())
+            CryptoAndSyncManager.applyCityBoards(inner, boardStates)
+
+            if (playerNameInput.isNotBlank()) {
+                val onlineProf = inner.optJSONObject("onlinePlayerProfile") ?: JSONObject()
+                onlineProf.put("playerName", playerNameInput)
+                onlineProf.put("renameableAt", "0001-01-01T00:00:00")
+                inner.put("onlinePlayerProfile", onlineProf)
             }
-        }
-        inner.put("wallet", walletArr)
-
-        CryptoAndSyncManager.applyCitySurfers(inner, surferStates)
-        CryptoAndSyncManager.applyUnlockedCitySkins(inner, unlockedSkinTags.toSet())
-        CryptoAndSyncManager.applyCityBoards(inner, boardStates)
-
-        if (playerNameInput.isNotBlank()) {
-            val onlineProf = inner.optJSONObject("onlinePlayerProfile") ?: JSONObject()
-            onlineProf.put("playerName", playerNameInput)
-            onlineProf.put("renameableAt", "0001-01-01T00:00:00")
-            inner.put("onlinePlayerProfile", onlineProf)
+        } catch (e: Exception) {
+            log("❌ Ошибка сборки JSON City: ${e.message}")
         }
     }
 
@@ -127,13 +109,18 @@ fun CityScreen(
             isBusy = true
             log("⏳ Чтение и расшифровка профиля Subway Surfers City...")
             val result = withContext(Dispatchers.IO) {
-                CryptoAndSyncManager.stopGameForSync(CryptoAndSyncManager.PKG_CITY, false) {}
-                val resolved = CryptoAndSyncManager.resolveCityProfilePath {}
-                val bytes = CryptoAndSyncManager.readFileViaShizuku(resolved, log)
-                if (bytes != null) {
-                    val (cont, inner) = CryptoAndSyncManager.decryptCityProfile(bytes)
-                    Triple(resolved, bytes, cont to inner)
-                } else null
+                try {
+                    CryptoAndSyncManager.stopGameForSync(CryptoAndSyncManager.PKG_CITY, false) {}
+                    val resolved = CryptoAndSyncManager.resolveCityProfilePath {}
+                    val bytes = CryptoAndSyncManager.readFileViaShizuku(resolved, log)
+                    if (bytes != null && bytes.size >= 32) {
+                        val (cont, inner) = CryptoAndSyncManager.decryptCityProfile(bytes)
+                        Triple(resolved, bytes, cont to inner)
+                    } else null
+                } catch (e: Exception) {
+                    log("❌ Ошибка расшифровки профиля City: ${e.message}")
+                    null
+                }
             }
             if (result != null) {
                 profilePath = result.first
@@ -141,9 +128,9 @@ fun CityScreen(
                 containerJsonState = result.third.first
                 innerProfileState = result.third.second
                 syncStateFromJson(result.third.second)
-                log("✅ Профиль City успешно расшифрован! Монет: ${currencies[-633437229L]}")
+                log("✅ Профиль City загружен! Монет: ${currencies[-633437229L]}")
             } else {
-                log("❌ Не удалось прочитать профиль City!")
+                log("⚠️ Файл профиля City не найден или ещё не создан игрой.")
             }
             isBusy = false
         }
@@ -158,9 +145,14 @@ fun CityScreen(
         scope.launch {
             isBusy = true
             val ok = withContext(Dispatchers.IO) {
-                CryptoAndSyncManager.stopGameForSync(CryptoAndSyncManager.PKG_CITY, true, log)
-                val enc = CryptoAndSyncManager.encryptCityProfile(origBytes, cont, inner)
-                CryptoAndSyncManager.writeFileViaShizuku(profilePath, enc, log)
+                try {
+                    CryptoAndSyncManager.stopGameForSync(CryptoAndSyncManager.PKG_CITY, true, log)
+                    val enc = CryptoAndSyncManager.encryptCityProfile(origBytes, cont, inner)
+                    CryptoAndSyncManager.writeFileViaShizuku(profilePath, enc, log)
+                } catch (e: Exception) {
+                    log("❌ Ошибка сохранения City: ${e.message}")
+                    false
+                }
             }
             if (ok) {
                 log("✅ Профиль City зашифрован и сохранён!")
@@ -217,9 +209,12 @@ fun CityScreen(
 
                     Button(
                         modifier = Modifier.weight(1.1f),
-                        enabled = inner != null && !isBusy,
+                        enabled = !isBusy,
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
-                        onClick = { saveCityProfileAsync(true) }
+                        onClick = {
+                            if (inner != null) saveCityProfileAsync(true)
+                            else CryptoAndSyncManager.launchGame(activity, CryptoAndSyncManager.PKG_CITY, log)
+                        }
                     ) { Text("🚀 В City", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold) }
                 }
             }
@@ -227,12 +222,19 @@ fun CityScreen(
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             if (inner == null) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Ожидание чтения профиля Subway Surfers City...")
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Профиль Subway Surfers City ещё не загружен.", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(onClick = { loadCityProfileAsync() }) {
+                        Text("🔄 Повторить чтение профиля")
+                    }
                 }
             } else {
                 when (selectedTab) {
-                    // ВКЛАДКА 0: ВАЛЮТЫ И ГРАДИЕНТНЫЙ НИКНЕЙМ UNITY
                     0 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -246,7 +248,7 @@ fun CityScreen(
                                     OutlinedTextField(
                                         value = playerNameInput,
                                         onValueChange = { playerNameInput = it },
-                                        label = { Text("Никнейм в профиле (поддерживает <color=#HEX>)") },
+                                        label = { Text("Никнейм в профиле") },
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -313,7 +315,6 @@ fun CityScreen(
                         }
                     }
 
-                    // ВКЛАДКА 1: СЁРФЕРЫ И СКИНЫ (БЕЗ СЛУЧАЙНЫХ РЕКОРДОВ!)
                     1 -> {
                         val filteredIndices = remember(searchQuery, uiTrigger) {
                             surferStates.indices.filter { idx ->
@@ -426,7 +427,6 @@ fun CityScreen(
                         }
                     }
 
-                    // ВКЛАДКА 2: ДОСКИ
                     2 -> {
                         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp)) {
                             Spacer(modifier = Modifier.height(6.dp))
@@ -487,7 +487,6 @@ fun CityScreen(
                         }
                     }
 
-                    // ВКЛАДКА 3: ПРОПУСКИ, РАЙОНЫ, КОПИЛКА И ИСПЫТАНИЯ
                     3 -> {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp).verticalScroll(rememberScrollState()),
@@ -524,7 +523,6 @@ fun CityScreen(
                         }
                     }
 
-                    // ВКЛАДКА 4: МУЛЬТИ-БЭКАПЫ И СЫРОЙ JSON-ИНСПЕКТОР
                     4 -> {
                         val allKeys = remember(inner, rawJsonKeySearch, uiTrigger) {
                             inner.keys().asSequence().toList().filter {
