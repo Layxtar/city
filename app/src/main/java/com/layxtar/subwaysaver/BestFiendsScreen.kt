@@ -35,19 +35,18 @@ fun BestFiendsScreen(
     var autoLockReadOnly by remember { mutableStateOf(true) }
     var isReadOnlyLocked by remember { mutableStateOf(false) }
 
-    // Поля для списания (слива) лишних валют
     var drainYellowInput by remember { mutableStateOf("240000000") }
     var drainBlueInput by remember { mutableStateOf("24000000") }
     var drainKeysInput by remember { mutableStateOf("199000") }
     var drainGoldInput by remember { mutableStateOf("50000") }
 
-    // Поля для накрутки ресурсов
     var gainGoldInput by remember { mutableStateOf("50000") }
     var gainKeysInput by remember { mutableStateOf("500") }
     var gainYellowInput by remember { mutableStateOf("500000") }
     var gainBlueInput by remember { mutableStateOf("500000") }
 
     var maxStyleIdInput by remember { mutableStateOf("9") }
+    var scannedFiendsText by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         if (CryptoAndSyncManager.hasPermission()) {
@@ -66,7 +65,7 @@ fun BestFiendsScreen(
                         "🐛 Донат-Букашки & Скины",
                         "🗑️ Списание (Слив валют)",
                         "💎 Накрутка & Геймплей",
-                        "🔒 Защита Read-Only & Бэкап"
+                        "🛡️ Metadata & Защита 444"
                     )
                     tabs.forEachIndexed { idx, title ->
                         Tab(
@@ -128,7 +127,6 @@ fun BestFiendsScreen(
             ) {
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Переключатели режима записи (Хот-Свап + Авто-блокировка 444)
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -143,7 +141,7 @@ fun BestFiendsScreen(
                 }
 
                 when (selectedTab) {
-                    // ==================== ВКЛАДКА 0: ДОНАТНЫЕ ПЕРСОНАЖИ И ВСЕ СКИНЫ ====================
+                    // ВКЛАДКА 0: ДОНАТНЫЕ ПЕРСОНАЖИ И ВСЕ СКИНЫ
                     0 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -181,7 +179,7 @@ fun BestFiendsScreen(
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("🎁 Все Персонажи + Все 600+ Скинов в Сундуках за Ключи", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Text(
-                                    "Генерирует `gachaLevelsFiends.json` строго по одному предмету на блок со 100% вероятностью (`probability: 1.0`, `fromLevel: 1`). Включает всех донатных персонажей и все стили (`styleId`).",
+                                    "Генерирует `gachaLevelsFiends.json` строго по одному предмету на блок со 100% вероятностью (`probability: 1.0`, `fromLevel: 1`).",
                                     fontSize = 12.sp,
                                     color = Color.Gray
                                 )
@@ -213,7 +211,7 @@ fun BestFiendsScreen(
                         }
                     }
 
-                    // ==================== ВКЛАДКА 1: КОНСТРУКТОР СПИСАНИЯ ЛИШНИХ ВАЛЮТ ====================
+                    // ВКЛАДКА 1: СПИСАНИЕ ЛИШНИХ ВАЛЮТ
                     1 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -277,7 +275,7 @@ fun BestFiendsScreen(
                         }
                     }
 
-                    // ==================== ВКЛАДКА 2: НАКРУТКА И ГЕЙМПЛЕЙНЫЕ МОДЫ ====================
+                    // ВКЛАДКА 2: НАКРУТКА И ГЕЙМПЛЕЙНЫЕ МОДЫ
                     2 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -336,7 +334,7 @@ fun BestFiendsScreen(
 
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("🚀 Геймплейные Моды (Fiendex, Бустеры 999, Ворота, Ходы)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("🚀 Геймплейные Моды в 1 клик", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Button(
                                     modifier = Modifier.fillMaxWidth(),
                                     onClick = {
@@ -351,8 +349,9 @@ fun BestFiendsScreen(
                                     }
                                 ) { Text("🐞 Покупка в Fiendex за 0🪙 + Бустеры по 999 шт.") }
 
-                                OutlinedButton(
+                                Button(
                                     modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
                                     onClick = {
                                         scope.launch {
                                             isBusy = true
@@ -363,16 +362,85 @@ fun BestFiendsScreen(
                                             isBusy = false
                                         }
                                     }
-                                ) { Text("⚔️ Убрать ворота на карте + 50 ходов за 0🪙") }
+                                ) { Text("⚔️ Авто-победа (+50 ходов, -95% ХП слизней) + Без ворот", color = Color.White) }
+
+                                Button(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6A1B9A)),
+                                    onClick = {
+                                        scope.launch {
+                                            isBusy = true
+                                            withContext(Dispatchers.IO) {
+                                                BestFiendsManager.installWheelBattlePassAndLevelJackpots(hotSwapMode, autoLockReadOnly, log)
+                                                isReadOnlyLocked = BestFiendsManager.isSettingsLocked()
+                                            }
+                                            isBusy = false
+                                        }
+                                    }
+                                ) { Text("🎡 Джекпот Колеса Фортуны + Баттл-Пасс за 1 очко", color = Color.White) }
+
+                                OutlinedButton(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = {
+                                        scope.launch {
+                                            isBusy = true
+                                            withContext(Dispatchers.IO) {
+                                                BestFiendsManager.disableAllAdsInGame(hotSwapMode, autoLockReadOnly, log)
+                                                isReadOnlyLocked = BestFiendsManager.isSettingsLocked()
+                                            }
+                                            isBusy = false
+                                        }
+                                    }
+                                ) { Text("🚫 Отключить всю рекламу (ads.json)") }
                             }
                         }
                     }
 
-                    // ==================== ВКЛАДКА 3: БЭКАП И ЛОГИ ====================
+                    // ВКЛАДКА 3: METADATA ПАТЧЕР И БЭКАПЫ
                     3 -> {
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("⏪ Откат к заводским настройкам Best Fiends", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text("🛡️ Патчер и Сканер global-metadata.dat (IL2CPP)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text(
+                                    "Блокирует внутри бинарника `global-metadata.dat` ссылки синхронизации конфигов (`https://` -> `http://0`), чтобы сервер не мог сбросить твои моды в `GameSettings` даже при открытых правах!",
+                                    fontSize = 12.sp,
+                                    color = Color.Gray
+                                )
+                                Button(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB71C1C)),
+                                    onClick = {
+                                        scope.launch {
+                                            isBusy = true
+                                            withContext(Dispatchers.IO) {
+                                                BestFiendsManager.patchGlobalMetadataKillConfigSync(log)
+                                            }
+                                            isBusy = false
+                                        }
+                                    }
+                                ) {
+                                    Text("🛡️ ЗАБЛОКИРОВАТЬ СЕРВЕРНЫЙ СБРОС В METADATA.DAT", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                }
+
+                                OutlinedButton(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = {
+                                        scope.launch {
+                                            isBusy = true
+                                            val list = withContext(Dispatchers.IO) {
+                                                BestFiendsManager.scanGlobalMetadataForFiendIds(log)
+                                            }
+                                            scannedFiendsText = list.joinToString(", ")
+                                            isBusy = false
+                                        }
+                                    }
+                                ) { Text("🔍 Просканировать metadata.dat на все ID букашек") }
+
+                                if (scannedFiendsText.isNotEmpty()) {
+                                    Text("Найдено: $scannedFiendsText", fontSize = 11.sp, color = Color(0xFF81C784))
+                                }
+
+                                Divider(modifier = Modifier.padding(vertical = 4.dp))
                                 OutlinedButton(
                                     modifier = Modifier.fillMaxWidth(),
                                     onClick = {
@@ -385,7 +453,7 @@ fun BestFiendsScreen(
                                             isBusy = false
                                         }
                                     }
-                                ) { Text("⏪ Восстановить оригиналы .json из бэкапов") }
+                                ) { Text("⏪ Восстановить оригиналы .json и metadata из бэкапов") }
                             }
                         }
 
@@ -393,7 +461,7 @@ fun BestFiendsScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(220.dp)
+                                .height(200.dp)
                                 .background(Color.Black)
                                 .padding(8.dp)
                         ) {
