@@ -370,4 +370,147 @@ fun BrimScreen(
                                     Text("Открыто питомцев: $ownedPetsCount", fontSize = 12.sp, color = Color(0xFF81C784))
                                     Button(
                                         modifier = Modifier.fillMaxWidth(),
-              
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1565C0)),
+                                        onClick = {
+                                            val upg = gearUpgradeLevelInput.toIntOrNull() ?: 10
+                                            BrimManager.unlockAndMaxAllPets(pJson, catalogState, upg)
+                                            uiTrigger++
+                                            log("🐺 Все питомцы (${catalogState.petIds.size} шт.) открыты и прокачаны!")
+                                        }
+                                    ) { Text("🐺 ОТКРЫТЬ ВСЕХ ПИТОМЦЕВ (ВОЛКИ / КОНИ / ДРАКОНЫ)", color = Color.White, fontSize = 11.sp) }
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        OutlinedTextField(
+                                            value = customPetIdInput,
+                                            onValueChange = { customPetIdInput = it },
+                                            label = { Text("Добавить ID питомца вручную") },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Button(onClick = {
+                                            val id = customPetIdInput.trim()
+                                            if (id.isNotEmpty()) {
+                                                val inv = pJson.optJSONObject("petInventory") ?: JSONObject()
+                                                inv.put(id, JSONObject().put("upgradeLevel", 10))
+                                                pJson.put("petInventory", inv)
+                                                pJson.put("petsCount", inv.length())
+                                                uiTrigger++
+                                                log("🐺 Питомец ID '$id' добавлен!")
+                                            }
+                                        }) { Text("+ Питомец") }
+                                    }
+                                }
+                            }
+
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("🎁 Сундуки (gachaBoxInventory) и Достижения (3⭐)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            BrimManager.addGachaBoxesToInventory(pJson, catalogState, 50)
+                                            uiTrigger++
+                                            log("🎁 В инвентарь добавлено по 50 сундуков каждого вида!")
+                                        }
+                                    ) { Text("🎁 Начислить по 50 Сундуков каждого типа") }
+
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                                        onClick = {
+                                            BrimManager.completeAllAchievementsAndFeatures(pJson, catalogState)
+                                            uiTrigger++
+                                            log("⭐ Все достижения закрыты на 3 звезды, цели глав выполнены, обучение пропущено!")
+                                        }
+                                    ) { Text("⭐ Выполнить все Достижения (3 звезды) и Миссии", color = Color.White) }
+                                }
+                            }
+                        }
+
+                        // ВКЛАДКА 3: ПАТЧЕР TOWER/GAMEDATA
+                        3 -> {
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("⚡ Патчинг игровых конфигов tower/gamedata", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text(
+                                        "Обнуляет стоимость покупок и улучшений в `pricelist.json`, `economy.json`, `straightupgrades.json` и делает возрождения бесплатными в `revive.json`.",
+                                        fontSize = 12.sp,
+                                        color = Color.Gray
+                                    )
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6A1B9A)),
+                                        onClick = {
+                                            scope.launch {
+                                                isBusy = true
+                                                withContext(Dispatchers.IO) {
+                                                    BrimManager.patchGameDataFreePricesAndRevive(log)
+                                                }
+                                                isBusy = false
+                                            }
+                                        }
+                                    ) {
+                                        Text("⚡ СДЕЛАТЬ ВСЕ ЦЕНЫ И ВОЗРОЖДЕНИЯ БЕСПЛАТНЫМИ (0🪙)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        // ВКЛАДКА 4: БЭКАПЫ И ИНФОРМАЦИЯ
+                        4 -> {
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("📦 Бэкап и Путь к профилю Blades of Brim", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    Text("Активный путь: $profilePath", fontSize = 11.sp, color = Color.Gray)
+                                    Button(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            scope.launch {
+                                                isBusy = true
+                                                withContext(Dispatchers.IO) {
+                                                    CryptoAndSyncManager.exportBackupToDownload(profilePath, "Brim", log)
+                                                }
+                                                isBusy = false
+                                            }
+                                        }
+                                    ) { Text("📦 Экспортировать user_profile в /Download") }
+
+                                    OutlinedButton(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = {
+                                            scope.launch {
+                                                isBusy = true
+                                                val ok = withContext(Dispatchers.IO) {
+                                                    CryptoAndSyncManager.restoreBackup(profilePath, log)
+                                                }
+                                                if (ok) loadBrimAsync()
+                                                isBusy = false
+                                            }
+                                        }
+                                    ) { Text("⏪ Восстановить оригинальный user_profile из бэкапа") }
+                                }
+                            }
+
+                            Text("📜 Журнал операций:", fontWeight = FontWeight.Bold)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .background(Color.Black)
+                                    .padding(8.dp)
+                            ) {
+                                Text(
+                                    text = logs,
+                                    color = Color.Green,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.verticalScroll(rememberScrollState())
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(90.dp))
+                }
+            }
+        }
+    }
+}
