@@ -206,30 +206,49 @@ object CryptoAndSyncManager {
         if (hardStop) execSh("am force-stop $packageName") else execSh("am kill $packageName")
     }
 
-    // Надёжный запуск любой игры (включая Best Fiends) через разрешение главной Activity в Shizuku
+    // Безотказный каскадный запуск любой игры через Shizuku (3 независимых метода в shell + Intent fallback)
     fun launchGame(context: Context, packageName: String = PKG_CITY, log: (String) -> Unit) {
         log("🚀 Запускаем $packageName...")
-        val launchCmd = """
-            comp=$(cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $packageName 2>/dev/null | tail -n 1)
-            if [ -n "${'$'}comp" ] && echo "${'$'}comp" | grep -q "/"; then
-                am start -n "${'$'}comp" --activity-Single-top 2>/dev/null && echo 'LAUNCH_OK'
-            else
-                monkey -p $packageName -c android.intent.category.LAUNCHER 1 2>/dev/null && echo 'LAUNCH_OK'
-            fi
-        """.trimIndent()
-        val (_, out) = execSh(launchCmd)
-        if (!out.contains("LAUNCH_OK")) {
-            try {
-                val intent = context.packageManager?.getLaunchIntentForPackage(packageName)
-                if (intent != null) {
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(intent)
-                } else {
-                    log("⚠️ Не удалось найти стартовую Activity для $packageName")
-                }
-            } catch (e: Exception) {
-                log("❌ Ошибка запуска: ${e.message}")
+
+        // Метод 1: Вычисляем точный компонент Activity через cmd package resolve-activity и запускаем без лишних флагов
+        val (_, resolveOut) = execSh(
+            "cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER $packageName 2>/dev/null | grep '/' | tail -n 1"
+        )
+        val component = resolveOut.trim().replace("\r", "").replace("\n", "")
+        if (component.contains("/")) {
+            val (code, startOut) = execSh("am start -n '$component' 2>&1")
+            if (code == 0 && !startOut.contains("Error", ignoreCase = true)) {
+                log("✅ Игра запущена ($component)")
+                return
             }
+        }
+
+        // Метод 2: Запуск через monkey
+        val (monkeyCode, monkeyOut) = execSh("monkey -p $packageName -c android.intent.category.LAUNCHER 1 2>&1")
+        if (monkeyCode == 0 && !monkeyOut.contains("No activities found", ignoreCase = true)) {
+            log("✅ Игра запущена!")
+            return
+        }
+
+        // Метод 3: Прямой am start по пакету
+        val (amCode, amOut) = execSh("am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p $packageName 2>&1")
+        if (amCode == 0 && !amOut.contains("Error", ignoreCase = true)) {
+            log("✅ Игра запущена!")
+            return
+        }
+
+        // Метод 4: Стандартный Android PackageManager
+        try {
+            val intent = context.packageManager?.getLaunchIntentForPackage(packageName)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                log("✅ Игра запущена через систему!")
+            } else {
+                log("⚠️ Игра ($packageName) не найдена на устройстве!")
+            }
+        } catch (e: Exception) {
+            log("❌ Ошибка запуска: ${e.message}")
         }
     }
 
@@ -347,7 +366,6 @@ object CryptoAndSyncManager {
     }
 
     // ==================== БЕЗОПАСНОЕ ЧТЕНИЕ И ЗАПИСЬ ВАЛЮТ SUBWAY SURFERS CITY ====================
-    // Поддерживает любые форматы хранения (массив currencies/items/wallet или словарь по ключам) без JSONException!
 
     fun readCityCurrencies(inner: JSONObject): Map<Long, Long> {
         val result = mutableMapOf<Long, Long>()
