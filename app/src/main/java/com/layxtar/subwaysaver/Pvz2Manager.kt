@@ -3,6 +3,13 @@ package com.layxtar.subwaysaver
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class Pvz2PlantSaveState(
+    val id: String,
+    var isUnlocked: Boolean,
+    var level: Int,
+    var mastery: Int
+)
+
 object Pvz2Manager {
 
     private val PACKAGES = listOf(
@@ -54,16 +61,6 @@ object Pvz2Manager {
         } catch (e: Exception) {
             log("❌ Ошибка декодирования RTON ($fullPath): ${e.message}")
             null
-        }
-    }
-
-    private fun readCleanOriginalRtonAsJson(fullPath: String, log: (String) -> Unit): JSONObject? {
-        val bakPath = "$fullPath.bak_editor"
-        val (_, out) = CryptoAndSyncManager.execSh("if [ -f '$bakPath' ]; then echo 'HAS_BAK'; fi")
-        return if (out.contains("HAS_BAK")) {
-            readRtonAsJson(bakPath, log) ?: readRtonAsJson(fullPath, log)
-        } else {
-            readRtonAsJson(fullPath, log)
         }
     }
 
@@ -148,59 +145,96 @@ object Pvz2Manager {
         return writeJsonAsRton(getPpDatPath(), ppJson, log)
     }
 
-    private fun collectAllPlantIds(cdnDir: String): List<String> {
-        val combined = LinkedHashSet<String>()
-        Pvz2Database.ALL_PLANT_IDS.forEach { combined.add(it.lowercase()) }
+    // ==================== ИНДИВИДУАЛЬНЫЙ РЕДАКТОР РАСТЕНИЙ И МИРОВ В PP.DAT ====================
 
-        val levelsJson = readCleanOriginalRtonAsJson("$cdnDir/PlantLevels.rton") {}
-            ?: readCleanOriginalRtonAsJson("$cdnDir/plantlevels.rton") {}
-        val lvlObjs = levelsJson?.optJSONArray("objects")
-        if (lvlObjs != null) {
-            for (i in 0 until lvlObjs.length()) {
-                val obj = lvlObjs.optJSONObject(i) ?: continue
-                val aliases = obj.optJSONArray("aliases")
-                if (aliases != null && aliases.length() > 0) {
-                    val alias = aliases.optString(0, "").trim().lowercase()
-                    if (alias.isNotEmpty() && !alias.contains("level") && !alias.contains("default")) {
-                        combined.add(alias)
-                    }
-                }
-            }
+    fun parsePlantsFromPpDat(ppJson: JSONObject): List<Pvz2PlantSaveState> {
+        val data = findPlayerDataObject(ppJson)
+        val plObj = data.optJSONObject("pl") ?: JSONObject()
+        return Pvz2Database.ALL_PLANT_IDS.map { plantId ->
+            val pNode = plObj.optJSONObject(plantId)
+            Pvz2PlantSaveState(
+                id = plantId,
+                isUnlocked = pNode != null,
+                level = pNode?.optInt("l", 1) ?: 1,
+                mastery = pNode?.optInt("m", 0) ?: 0
+            )
         }
-        return combined.toList()
     }
 
-    // ==================== 1. ПОЛНЫЙ МАГАЗИН С СОХРАНЕНИЕМ ОБЫЧНЫХ ТОВАРОВ + ВСЕ РАСТЕНИЯ (BANEBERRY), СКИНЫ, СЕМЕНА, ОГРОМНЫЕ ВАЛЮТЫ И УДАЛЕНИЕ ====================
+    fun applyIndividualPlantsToPpDat(
+        ppJson: JSONObject,
+        plants: List<Pvz2PlantSaveState>,
+        log: (String) -> Unit
+    ): Boolean {
+        val data = findPlayerDataObject(ppJson)
+        val plObj = data.optJSONObject("pl") ?: JSONObject()
+        for (p in plants) {
+            if (p.isUnlocked) {
+                plObj.put(p.id, JSONObject().apply {
+                    put("l", p.level.coerceIn(1, 20))
+                    put("m", p.mastery.coerceIn(0, 200))
+                    put("xp", 999999)
+                })
+            } else {
+                plObj.remove(p.id)
+            }
+        }
+        data.put("pl", plObj)
+        return writeJsonAsRton(getPpDatPath(), ppJson, log)
+    }
+
+    fun unlockAllWorldsInPpDat(ppJson: JSONObject, log: (String) -> Unit): Boolean {
+        val data = findPlayerDataObject(ppJson)
+        val worldIds = listOf(
+            "egypt", "pirate", "cowboy", "future", "dark",
+            "beach", "iceage", "lostcity", "eighties", "dino", "modern"
+        )
+        val wmi = data.optJSONArray("wmi") ?: JSONArray()
+        val existingWorlds = mutableSetOf<String>()
+        for (i in 0 until wmi.length()) {
+            val wObj = wmi.optJSONObject(i) ?: continue
+            wObj.put("u", true)
+            existingWorlds.add(wObj.optString("w"))
+        }
+        for (wName in worldIds) {
+            if (existingWorlds.add(wName)) {
+                wmi.put(JSONObject().put("w", wName).put("u", true))
+            }
+        }
+        data.put("wmi", wmi)
+        val ok = writeJsonAsRton(getPpDatPath(), ppJson, log)
+        if (ok) log("🌍 Все 11 миров открыты в сохранении pp.dat!")
+        return ok
+    }
+
+    // ==================== 1. МАГАЗИН ЗА 1 МОНЕТУ ====================
 
     fun installFullMegaShopAllPlantsSkinsAndSeeds(cdnDir: String, log: (String) -> Unit): Boolean {
-        val allPlants = collectAllPlantIds(cdnDir)
-        log("🌿 Всего растений (включая Baneberry и новые): ${allPlants.size}")
-
-        log("⏳ 1/5: Запись фильтра магазина magento_filter.rton...")
-        val magentoJson = buildMagentoFilterJson(allPlants)
+        log("⏳ 1/5: Запись magento_filter.rton...")
+        val magentoJson = buildMagentoFilterJson()
         if (!writeJsonAsRton("$cdnDir/magento_filter.rton", magentoJson, log)) return false
 
-        log("⏳ 2/5: Запись полного макета вкладок market_layout.rton (Promoted, Resources, Costumes, Upgrades, Plants, Bundles, DeleteItems, Seeds, Seeds2, Seeds3, Piñatas)...")
-        val layoutJson = buildFullMarketLayoutJson()
+        log("⏳ 2/5: Запись макета вкладок market_layout.rton...")
+        val layoutJson = buildMarketLayoutJson()
         if (!writeJsonAsRton("$cdnDir/market_layout.rton", layoutJson, log)) return false
 
-        log("⏳ 3/5: Прошивка индивидуальных таблиц семян в pinatacoreloot.rton для всех ${allPlants.size} растений...")
-        patchPinataCoreLootExactMethod(cdnDir, allPlants, log)
+        log("⏳ 3/5: Запись резервных таблиц pinatacoreloot.rton...")
+        patchPinataCoreLootForAllSeedPackets(cdnDir, log)
 
-        log("⏳ 4/5: Сборка products.rton и market_schedule.rton (оригинальные товары по 1🪙 + большие валюты + семена + костюмы + удаление)...")
-        val (productsJson, scheduleJson) = buildProductsAndScheduleFull(cdnDir, allPlants, log)
+        log("⏳ 4/5: Генерация нативных продуктов products.rton...")
+        val (productsJson, scheduleJson) = buildProductsAndMarketScheduleJson()
         if (!writeJsonAsRton("$cdnDir/products.rton", productsJson, log)) return false
 
         log("⏳ 5/5: Запись расписания витрины market_schedule.rton...")
         if (!writeJsonAsRton("$cdnDir/market_schedule.rton", scheduleJson, log)) return false
 
-        log("🎉 Магазин установлен! Все вкладки (Plants, Costumes, Seeds 1-3, DeleteItems, Resources с обычными и огромными пакетами) на месте!")
+        log("🎉 Магазин обновлён! Нативные семена, растения и костюмы выставлены за 1🪙.")
         return true
     }
 
-    private fun buildMagentoFilterJson(allPlants: List<String>): JSONObject {
+    private fun buildMagentoFilterJson(): JSONObject {
         val plantSubTypes = JSONArray()
-        allPlants.forEach { plantSubTypes.put(it) }
+        Pvz2Database.ALL_PLANT_IDS.forEach { plantSubTypes.put(it) }
 
         val upgradeSubTypes = JSONArray()
         Pvz2Database.GAME_UPGRADES.forEach { upgradeSubTypes.put(it) }
@@ -215,18 +249,12 @@ object Pvz2Manager {
             put(JSONObject().put("Type", "fuel").put("WarnEnsureRealMoneyOnly", false))
             put(JSONObject().put("Type", "mint").put("WarnEnsureRealMoneyOnly", false))
             put(JSONObject().put("Type", "bundle").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "keygate").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "stargate").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "eventenergy").put("WarnEnsureGemsOnly", false))
-            put(JSONObject().put("Type", "crown").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "tapjoy").put("WarnEnsureGemsOnly", false))
-            put(JSONObject().put("Type", "iftoken").put("WarnEnsureRealMoneyOnly", false))
-            put(JSONObject().put("Type", "rewardmultiplier").put("WarnEnsureRealMoneyOnly", false))
             put(JSONObject().put("Type", "sprout").put("WarnEnsureGemsOnly", false))
+            put(JSONObject().put("Type", "pinata").put("WarnEnsureRealMoneyOnly", false))
+            put(JSONObject().put("Type", "seedpacket").put("WarnEnsureRealMoneyOnly", false).put("SubTypeFilters", plantSubTypes))
             put(JSONObject().put("Type", "plant").put("SubTypeFilters", plantSubTypes))
             put(JSONObject().put("Type", "gameupgrade").put("WarnEnsureRealMoneyOnly", false).put("SubTypeFilters", upgradeSubTypes))
             put(JSONObject().put("Type", "costume").put("SubTypeFilters", costumeSubTypes))
-            put(JSONObject().put("Type", "pinata").put("WarnEnsureRealMoneyOnly", false))
         }
 
         val sheetObj = JSONObject().apply {
@@ -241,20 +269,11 @@ object Pvz2Manager {
         }
     }
 
-    // Точный макет из твоего файла market_layout_2.json со всеми вкладками:
-    // Promoted, Resources, Costumes, Upgrades, Plants, Bundles, DeleteItems (Delet), Seeds, Seeds2, Seeds3, Piñatas!
-    private fun buildFullMarketLayoutJson(): JSONObject {
+    private fun buildMarketLayoutJson(): JSONObject {
         val mainClusters = JSONArray().apply {
-            put("Promotions")
-            put("Costumes")
-            put("Upgrades")
-            put("Plants")
-            put("Bundles")
-            put("Delet")
-            put("Seeds")
-            put("Seeds2")
-            put("Seeds3")
-            put("Pinatas")
+            put("Promotions"); put("Costumes"); put("Upgrades")
+            put("Plants"); put("Bundles"); put("Seeds")
+            put("Seeds2"); put("Seeds3"); put("Pinatas")
         }
 
         val markets = JSONArray().apply {
@@ -279,7 +298,6 @@ object Pvz2Manager {
             put(JSONObject().put("Type", "Seeds2").put("Tabs", JSONArray().put("Seeds2")))
             put(JSONObject().put("Type", "Seeds3").put("Tabs", JSONArray().put("Seeds3")))
             put(JSONObject().put("Type", "Upgrades").put("Tabs", JSONArray().put("Upgrades")))
-            put(JSONObject().put("Type", "Delet").put("Tabs", JSONArray().put("Delet")))
             put(JSONObject().put("Type", "Tutorial").put("Tabs", JSONArray().put("Tutorial")))
             put(JSONObject().put("Type", "Tutorial50MB").put("Tabs", JSONArray().put("Tutorial50MB")))
             put(JSONObject().put("Type", "CoinQuickStore").put("Tabs", JSONArray().put("CoinQuickStore")))
@@ -301,7 +319,6 @@ object Pvz2Manager {
             put(JSONObject().put("Type", "Seeds2").put("Name", "Seeds2").put("ImageDown", "IMAGE_UI_STORE_SPROUTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_SPROUTSTAB_ACTIVE").put("Categories", JSONArray().put("Seeds2")))
             put(JSONObject().put("Type", "Seeds3").put("Name", "Seeds3").put("ImageDown", "IMAGE_UI_STORE_SPROUTSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_SPROUTSTAB_ACTIVE").put("Categories", JSONArray().put("Seeds3")))
             put(JSONObject().put("Type", "Upgrades").put("Name", "Upgrades").put("ImageDown", "IMAGE_UI_STORE_UPGRADESTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_UPGRADESTAB_ACTIVE").put("Categories", JSONArray().put("Upgrades")))
-            put(JSONObject().put("Type", "Delet").put("Name", "DeleteItems").put("ImageDown", "IMAGE_UI_STORE_GEMSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_GEMSTAB_ACTIVE").put("Categories", JSONArray().put("DeletCoin").put("DeletGem").put("DeletTicket").put("DeletFuel").put("DeletSprout").put("DeletMint")))
             put(JSONObject().put("Type", "Tutorial").put("Name", "Tutorial").put("ImageDown", "IMAGE_UI_STORE_PINATASTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PLANTSTAB_ACTIVE").put("Categories", JSONArray().put("Tutorial")))
             put(JSONObject().put("Type", "Tutorial50MB").put("Name", "Tutorial50MB").put("ImageDown", "IMAGE_UI_STORE_PINATASTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_PLANTSTAB_ACTIVE").put("Categories", JSONArray().put("Tutorial50MB")))
             put(JSONObject().put("Type", "CoinQuickStore").put("Name", "Coins").put("ImageDown", "IMAGE_UI_STORE_COINSTAB_DOWN").put("ImageActive", "IMAGE_UI_STORE_COINSTAB_ACTIVE").put("Categories", JSONArray().put("QuickCoins")))
@@ -316,24 +333,18 @@ object Pvz2Manager {
             put(JSONObject().put("Type", "Promoted Offers").put("LabelText", "Shop 1 Coin").put("MaxCount", -1).put("PromotionSlots", JSONArray().put("Slot1").put("Slot2").put("Slot3").put("Slot4").put("Slot5").put("Slot6").put("Slot7")))
             put(JSONObject().put("Type", "Coins").put("LabelText", "Coins").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_COIN_CARD"))
             put(JSONObject().put("Type", "Gems").put("LabelText", "Gems").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_GEM_CARD"))
-            put(JSONObject().put("Type", "Tickets").put("LabelText", "Tickets & Energy").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_UPGRADE_CARD"))
-            put(JSONObject().put("Type", "Fuel").put("LabelText", "Fuel & Keys").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
+            put(JSONObject().put("Type", "Tickets").put("LabelText", "Tickets").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_UPGRADE_CARD"))
+            put(JSONObject().put("Type", "Fuel").put("LabelText", "Fuel").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
             put(JSONObject().put("Type", "Sprouts").put("LabelText", "Sprouts").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
-            put(JSONObject().put("Type", "Mint").put("LabelText", "Mints & Candies").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PINATA_CARD"))
+            put(JSONObject().put("Type", "Mint").put("LabelText", "Mints").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PINATA_CARD"))
             put(JSONObject().put("Type", "Pinatas").put("LabelText", "Piñatas").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_GEM_CARD"))
             put(JSONObject().put("Type", "Bundles").put("LabelText", "Bundles").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_BUNDLE_CARD"))
             put(JSONObject().put("Type", "Plants").put("LabelText", "Plants").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
             put(JSONObject().put("Type", "Costumes").put("LabelText", "Costumes").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
-            put(JSONObject().put("Type", "Seeds").put("LabelText", "Seed Packets (Classic)").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
-            put(JSONObject().put("Type", "Seeds2").put("LabelText", "Seed Packets (Newest + Baneberry)").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
-            put(JSONObject().put("Type", "Seeds3").put("LabelText", "Seed Packets (Part 3)").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
+            put(JSONObject().put("Type", "Seeds").put("LabelText", "Seed Packets").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
+            put(JSONObject().put("Type", "Seeds2").put("LabelText", "Seed Packets").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
+            put(JSONObject().put("Type", "Seeds3").put("LabelText", "Seed Packets").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
             put(JSONObject().put("Type", "Upgrades").put("LabelText", "Upgrades").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_UPGRADE_CARD"))
-            put(JSONObject().put("Type", "DeletCoin").put("LabelText", "Delete Coins").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_COIN_CARD"))
-            put(JSONObject().put("Type", "DeletGem").put("LabelText", "Delete Gems").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_GEM_CARD"))
-            put(JSONObject().put("Type", "DeletTicket").put("LabelText", "Delete Tickets").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_UPGRADE_CARD"))
-            put(JSONObject().put("Type", "DeletFuel").put("LabelText", "Delete Fuels").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
-            put(JSONObject().put("Type", "DeletSprout").put("LabelText", "Delete Sprouts").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_SPROUT_CARD"))
-            put(JSONObject().put("Type", "DeletMint").put("LabelText", "Delete Mints").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PINATA_CARD"))
             put(JSONObject().put("Type", "Tutorial").put("LabelText", "Tutorial").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
             put(JSONObject().put("Type", "Tutorial50MB").put("LabelText", "Tutorial50MB").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_PLANT_CARD"))
             put(JSONObject().put("Type", "QuickCoins").put("LabelText", "Coins").put("MaxCount", -1).put("Card", "IMAGE_UI_CARDS_STORE_STORE_COIN_CARD"))
@@ -371,89 +382,27 @@ object Pvz2Manager {
         }
     }
 
-    private fun replaceDeepPlantIdAndCount(
-        node: Any?,
-        sourcePlantName: String,
-        targetPlantId: String,
-        targetTableId: String,
-        targetAmount: Int
-    ) {
-        when (node) {
-            is JSONObject -> {
-                val keys = node.keys().asSequence().toList()
-                for (k in keys) {
-                    val v = node.opt(k)
-                    when {
-                        k.equals("Id", ignoreCase = true) || k.equals("TableId", ignoreCase = true) -> {
-                            node.put(k, targetTableId)
-                        }
-                        v is String -> {
-                            if (v.equals(sourcePlantName, ignoreCase = true) ||
-                                v.equals("peashooter", ignoreCase = true) ||
-                                v.equals("akee", ignoreCase = true)
-                            ) {
-                                node.put(k, targetPlantId)
-                            } else if (v.contains(sourcePlantName, ignoreCase = true)) {
-                                node.put(k, v.replace(sourcePlantName, targetPlantId, ignoreCase = true))
-                            }
-                        }
-                        v is Number -> {
-                            if (k.equals("Min", ignoreCase = true) ||
-                                k.equals("Max", ignoreCase = true) ||
-                                k.equals("Amount", ignoreCase = true) ||
-                                k.equals("Count", ignoreCase = true)
-                            ) {
-                                node.put(k, targetAmount)
-                            }
-                        }
-                        v is JSONArray || v is JSONObject -> {
-                            replaceDeepPlantIdAndCount(v, sourcePlantName, targetPlantId, targetTableId, targetAmount)
-                        }
-                    }
-                }
-            }
-            is JSONArray -> {
-                for (i in 0 until node.length()) {
-                    val elem = node.opt(i)
-                    if (elem is String) {
-                        if (elem.equals(sourcePlantName, ignoreCase = true) ||
-                            elem.equals("peashooter", ignoreCase = true) ||
-                            elem.equals("akee", ignoreCase = true)
-                        ) {
-                            node.put(i, targetPlantId)
-                        }
-                    } else if (elem is JSONObject || elem is JSONArray) {
-                        replaceDeepPlantIdAndCount(elem, sourcePlantName, targetPlantId, targetTableId, targetAmount)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun patchPinataCoreLootExactMethod(
-        cdnDir: String,
-        allPlants: List<String>,
-        log: (String) -> Unit
-    ) {
+    private fun patchPinataCoreLootForAllSeedPackets(cdnDir: String, log: (String) -> Unit) {
         val path = "$cdnDir/pinatacoreloot.rton"
-        val json = readCleanOriginalRtonAsJson(path, log) ?: return
+        val json = readRtonAsJson(path, log) ?: return
         val objects = json.optJSONArray("objects") ?: return
 
         var slotConfigsObj: JSONObject? = null
-        var tablesParentData: JSONObject? = null
+        var rewardTablesDict: JSONObject? = null
 
         for (i in 0 until objects.length()) {
             val obj = objects.getJSONObject(i)
             val data = obj.optJSONObject("objdata") ?: continue
             if (data.has("SlotConfigs")) {
                 slotConfigsObj = data.optJSONObject("SlotConfigs")
-            } else {
-                tablesParentData = data
+            }
+            if (data.has("Tables") && data.opt("Tables") is JSONObject) {
+                rewardTablesDict = data.optJSONObject("Tables")
             }
         }
 
-        if (slotConfigsObj != null) {
-            for (plantId in allPlants) {
+        if (slotConfigsObj != null && rewardTablesDict != null) {
+            for (plantId in Pvz2Database.ALL_PLANT_IDS) {
                 val slotKey = "free_seed_${plantId}1"
                 val tableKey = "seed_${plantId}1"
 
@@ -465,190 +414,24 @@ object Pvz2Manager {
                     put("RewardsTable", tableKey)
                     put("Slots", JSONArray().put("PlantXP"))
                 })
-            }
 
-            val multiSlots = JSONArray().apply {
-                repeat(allPlants.size) { put("PlantXP") }
-            }
-            val megaPinataKeys = listOf(
-                "free_all_xp_plants_bronze" to "all_xp_plants_bronze_0",
-                "free_all_xp_plants_silver" to "all_xp_plants_silver_0",
-                "free_all_xp_plants_gold" to "all_xp_plants_gold_0",
-                "free_all_xp_plants_max" to "all_xp_plants_max_0",
-                "free_all_xp_plants_100000000" to "all_xp_plants_100000000_0"
-            )
-            for ((sKey, tKey) in megaPinataKeys) {
-                slotConfigsObj.put(sKey, JSONObject().apply {
-                    put("BonusTable", "bonus_standard")
-                    put("PercentBonusAward", 0)
-                    put("PercentPinataAward", 1)
-                    put("PinataType", "free")
-                    put("RewardsTable", tKey)
-                    put("Slots", multiSlots)
+                rewardTablesDict.put(tableKey, JSONObject().apply {
+                    put("Rewards", JSONArray().put(JSONObject().apply {
+                        put("Entities", JSONArray().put(plantId))
+                        put("Max", 1)
+                        put("Min", 1)
+                        put("Type", "PlantXP")
+                        put("Weight", 100)
+                    }))
                 })
-            }
-        }
-
-        if (tablesParentData != null) {
-            val tableKeyName = tablesParentData.keys().asSequence().firstOrNull { k ->
-                tablesParentData.opt(k) is JSONObject || tablesParentData.opt(k) is JSONArray
-            }
-
-            if (tableKeyName != null) {
-                val container = tablesParentData.opt(tableKeyName)
-
-                if (container is JSONObject) {
-                    var sourcePlant = "peashooter"
-                    var templateObj = container.optJSONObject("peashooter1")
-                    if (templateObj == null) {
-                        sourcePlant = "akee"
-                        templateObj = container.optJSONObject("akee1")
-                    }
-                    if (templateObj == null) {
-                        sourcePlant = "sunflower"
-                        templateObj = container.optJSONObject("sunflower50")
-                    }
-
-                    for (plantId in allPlants) {
-                        val tableKey = "seed_${plantId}1"
-                        if (templateObj != null) {
-                            val cloned = JSONObject(templateObj.toString())
-                            replaceDeepPlantIdAndCount(cloned, sourcePlant, plantId, tableKey, 1)
-                            container.put(tableKey, cloned)
-                        } else {
-                            container.put(tableKey, JSONObject().apply {
-                                put("Rewards", JSONArray().put(JSONObject().apply {
-                                    put("Entities", JSONArray().put(plantId))
-                                    put("Plant", plantId)
-                                    put("Item", plantId)
-                                    put("Min", 1)
-                                    put("Max", 1)
-                                    put("Amount", 1)
-                                    put("Type", "PlantXP")
-                                    put("Weight", 100)
-                                }))
-                            })
-                        }
-                    }
-
-                    val megaTiers = listOf(
-                        "all_xp_plants_bronze_0" to 100,
-                        "all_xp_plants_silver_0" to 1000,
-                        "all_xp_plants_gold_0" to 5000,
-                        "all_xp_plants_max_0" to 50000,
-                        "all_xp_plants_100000000_0" to 100000000
-                    )
-                    for ((tKey, amt) in megaTiers) {
-                        val allRewards = JSONArray()
-                        for (plantId in allPlants) {
-                            if (templateObj != null) {
-                                val singleClone = JSONObject(templateObj.toString())
-                                replaceDeepPlantIdAndCount(singleClone, sourcePlant, plantId, tKey, amt)
-                                val subArr = singleClone.optJSONArray("Rewards") ?: singleClone.optJSONArray("SubTables")
-                                if (subArr != null && subArr.length() > 0) {
-                                    allRewards.put(subArr.getJSONObject(0))
-                                }
-                            } else {
-                                allRewards.put(JSONObject().apply {
-                                    put("Entities", JSONArray().put(plantId))
-                                    put("Plant", plantId)
-                                    put("Min", amt)
-                                    put("Max", amt)
-                                    put("Amount", amt)
-                                    put("Type", "PlantXP")
-                                    put("Weight", 100)
-                                })
-                            }
-                        }
-                        container.put(tKey, JSONObject().put("Rewards", allRewards))
-                    }
-                } else if (container is JSONArray) {
-                    var sourcePlant = "peashooter"
-                    var templateObj: JSONObject? = null
-                    val existingIds = mutableMapOf<String, Int>()
-
-                    for (i in 0 until container.length()) {
-                        val item = container.optJSONObject(i) ?: continue
-                        val idStr = item.optString("Id", item.optString("TableId", ""))
-                        if (idStr.isNotEmpty()) existingIds[idStr] = i
-                        if (idStr == "peashooter1") {
-                            sourcePlant = "peashooter"
-                            templateObj = item
-                        } else if (templateObj == null && idStr == "akee1") {
-                            sourcePlant = "akee"
-                            templateObj = item
-                        }
-                    }
-
-                    for (plantId in allPlants) {
-                        val tableKey = "seed_${plantId}1"
-                        val newEntry = if (templateObj != null) {
-                            JSONObject(templateObj.toString()).also { cloned ->
-                                replaceDeepPlantIdAndCount(cloned, sourcePlant, plantId, tableKey, 1)
-                            }
-                        } else {
-                            JSONObject().apply {
-                                put("Id", tableKey)
-                                put("Rewards", JSONArray().put(JSONObject().apply {
-                                    put("Entities", JSONArray().put(plantId))
-                                    put("Plant", plantId)
-                                    put("Min", 1)
-                                    put("Max", 1)
-                                    put("Amount", 1)
-                                    put("Type", "PlantXP")
-                                    put("Weight", 100)
-                                }))
-                            }
-                        }
-                        val existIdx = existingIds[tableKey]
-                        if (existIdx != null) {
-                            container.put(existIdx, newEntry)
-                        } else {
-                            container.put(newEntry)
-                        }
-                    }
-                }
             }
         }
 
         writeJsonAsRton(path, json, log)
     }
 
-    // ПОЛНАЯ СБОРКА PRODUCTS.RTON И MARKET_SCHEDULE.RTON:
-    // 1. Сначала идут оригинальные товары и расписания игры (переведённые в 1 монету).
-    // 2. Затем во вкладке Resources сразу после обычных значений идут ОГРОМНЫЕ значения (1K .. 1B и Max) для всех видов валют (монеты, гемы, мяты/конфеты, перчатки, топливо, ростки, энергия, короны, жетоны).
-    // 3. Во вкладках Plants, Costumes, Seeds, Seeds2, Seeds3, DeleteItems, Bundles и Piñatas лежат все растения (включая Baneberry), 342 скина, семена и удаление валют!
-    private fun buildProductsAndScheduleFull(
-        cdnDir: String,
-        allPlants: List<String>,
-        log: (String) -> Unit
-    ): Pair<JSONObject, JSONObject> {
-        val origProductsJson = readCleanOriginalRtonAsJson("$cdnDir/products.rton", log)
-        val origScheduleJson = readCleanOriginalRtonAsJson("$cdnDir/market_schedule.rton", log)
-
+    private fun buildProductsAndMarketScheduleJson(): Pair<JSONObject, JSONObject> {
         val productsArr = JSONArray()
-        val addedSkus = mutableSetOf<String>()
-
-        // 1. Сохраняем ВСЕ оригинальные товары игры по 1 монете
-        val origObjects = origProductsJson?.optJSONArray("objects")
-        if (origObjects != null) {
-            for (i in 0 until origObjects.length()) {
-                val obj = origObjects.optJSONObject(i) ?: continue
-                val data = obj.optJSONObject("objdata")
-                if (data != null) {
-                    val sku = data.optString("Sku", "")
-                    if (sku.isNotEmpty() && addedSkus.add(sku)) {
-                        data.put("PriceCoins", "1")
-                        data.put("PriceGems", 0)
-                        data.put("PriceMints", 0)
-                        data.put("Price", 0)
-                        data.put("IsFree", false)
-                        data.put("IsAdPlacement", false)
-                        productsArr.put(obj)
-                    }
-                }
-            }
-        }
 
         fun addStoreProduct(
             sku: String,
@@ -658,11 +441,13 @@ object Pvz2Manager {
             objectType: String,
             objectItem: String,
             objectCount: Int,
+            artCenter: String = "",
             bundleProps: JSONArray? = null
         ) {
-            if (!addedSkus.add(sku)) return
             val objData = JSONObject().apply {
                 if (bundleProps != null) put("BundleProps", bundleProps)
+                if (artCenter.isNotEmpty()) put("ArtCenter", artCenter)
+                put("IsAdPlacement", false)
                 put("IsFree", false)
                 put("IsOneTimePurchase", false)
                 put("LawnDescription", desc)
@@ -690,11 +475,10 @@ object Pvz2Manager {
         val scheduledSeeds3 = JSONArray()
         val scheduledUpgrades = JSONArray()
         val scheduledResources = JSONArray()
-        val scheduledDeleteItems = JSONArray()
         val scheduledBundles = JSONArray()
         val scheduledPinatas = JSONArray()
 
-        fun makeScheduleEntry(category: String, sku: String, visualTag: String = ""): JSONObject {
+        fun makeScheduleEntry(category: String, sku: String): JSONObject {
             return JSONObject().apply {
                 put("Comment", "")
                 put("Category", category)
@@ -706,23 +490,18 @@ object Pvz2Manager {
                 put("SoftCost", -1)
                 put("MaxPurchase", -1)
                 put("SoftCostPerPurchase", -1)
-                if (visualTag.isNotEmpty()) {
-                    put("Visuals", JSONArray().put(visualTag))
-                } else {
-                    put("Visuals", "RTID(0)")
-                }
+                put("Visuals", "RTID(0)")
                 put("Sku", JSONArray().put(sku).put(sku))
             }
         }
 
-        // 2. Все Растения (включая Baneberry) во вкладку Plants + их Семена во вкладки Seeds, Seeds2, Seeds3
         val allPlantSkus = JSONArray()
         val classicSeedTiers = listOf(1, 100, 10000)
         val newestSeedTiers = listOf(1, 100, 10000, 100000, 1000000)
 
-        allPlants.forEachIndexed { index, plantId ->
+        Pvz2Database.ALL_PLANT_IDS.forEachIndexed { index, plantId ->
             val upper = plantId.uppercase()
-            val plantSku = "custom.Plant.$plantId"
+            val plantSku = "shop.Plant.$plantId"
             allPlantSkus.put(plantSku)
 
             addStoreProduct(
@@ -732,9 +511,10 @@ object Pvz2Manager {
                 shortDesc = upper,
                 objectType = "plant",
                 objectItem = plantId,
-                objectCount = 1
+                objectCount = 1,
+                artCenter = plantId
             )
-            scheduledPlants.put(makeScheduleEntry("Plants", plantSku, if (index < 30) "new" else ""))
+            scheduledPlants.put(makeScheduleEntry("Plants", plantSku))
 
             val isNewest = index < 75
             val targetCat = when {
@@ -750,79 +530,32 @@ object Pvz2Manager {
 
             val tiers = if (isNewest) newestSeedTiers else classicSeedTiers
             for (amt in tiers) {
-                val seedSku = "custom.SeedPacket.$plantId.$amt"
+                val seedSku = "shop.SeedPacket.$plantId.$amt"
                 addStoreProduct(
                     sku = seedSku,
-                    name = "SeedPacket - $plantId.$amt",
-                    desc = upper,
+                    name = "SeedPacket - $plantId x$amt",
+                    desc = "$amt Seed Packets for $upper",
                     shortDesc = upper,
-                    objectType = "pinata",
-                    objectItem = "free_seed_${plantId}1",
-                    objectCount = amt
+                    objectType = "seedpacket",
+                    objectItem = plantId,
+                    objectCount = amt,
+                    artCenter = plantId
                 )
-                targetArr.put(makeScheduleEntry(targetCat, seedSku, if (isNewest) "new" else ""))
+                targetArr.put(makeScheduleEntry(targetCat, seedSku))
             }
         }
 
-        // 3. Все 342 Костюма во вкладку Costumes
-        for (costumeId in 1..342) {
-            val cSku = "custom.Costume.$costumeId"
-            addStoreProduct(
-                sku = cSku,
-                name = "Costume $costumeId",
-                desc = "Costume $costumeId",
-                shortDesc = "Costume $costumeId",
-                objectType = "costume",
-                objectItem = costumeId.toString(),
-                objectCount = 1
-            )
-            scheduledCostumes.put(makeScheduleEntry("Costumes", cSku))
-        }
-
-        // 4. Все 40 Игровых Апгрейдов во вкладку Upgrades
-        for (upgId in Pvz2Database.GAME_UPGRADES) {
-            val uSku = "custom.Upgrade.$upgId"
-            addStoreProduct(
-                sku = uSku,
-                name = "Upgrade - $upgId",
-                desc = "STORE_CATEGORY_DAILY_OFFERS",
-                shortDesc = upgId,
-                objectType = "gameupgrade",
-                objectItem = upgId,
-                objectCount = 1
-            )
-            scheduledUpgrades.put(makeScheduleEntry("Upgrades", uSku))
-        }
-
-        // 5. Бандлы и Бонусные умножители x200 во вкладку Bundles
-        val bonusMultipliers = listOf(
-            Triple("custom.Bonus.Calendar200x", "Calendar - 200x Rewards", "calendar"),
-            Triple("custom.Bonus.Quest200x", "Quest - 200x Rewards", "quest")
-        )
-        for ((bSku, bName, bItem) in bonusMultipliers) {
-            addStoreProduct(
-                sku = bSku,
-                name = bName,
-                desc = bName,
-                shortDesc = bName,
-                objectType = "rewardmultiplier",
-                objectItem = bItem,
-                objectCount = 200
-            )
-            scheduledBundles.put(makeScheduleEntry("Bundles", bSku, "new"))
-        }
-
         val bundlesList = listOf(
-            Triple("custom.Bundle.Total", "Legendary Bundle (All Plants)", "greenthumb"),
-            Triple("custom.Bundle.AllPremium", "All Premium Plants Bundle", "kiwibeastbundle"),
-            Triple("custom.Bundle.Common", "All World Plants Bundle", "whipsnip"),
-            Triple("custom.Bundle.Mints", "All Power Mints Bundle", "dragonshoard")
+            Triple("shop.Bundle.Total", "Legendary Bundle (All 214 Plants)", "greenthumb"),
+            Triple("shop.Bundle.AllPremium", "All Premium Bundle", "kiwibeastbundle"),
+            Triple("shop.Bundle.Common", "All World Plants Bundle", "whipsnip"),
+            Triple("shop.Bundle.Mints", "All Power Mints Bundle", "dragonshoard")
         )
         for ((bSku, bTitle, bIcon) in bundlesList) {
             addStoreProduct(
                 sku = bSku,
                 name = bTitle,
-                desc = bTitle,
+                desc = "All Plants...",
                 shortDesc = bTitle,
                 objectType = "bundle",
                 objectItem = bIcon,
@@ -830,27 +563,6 @@ object Pvz2Manager {
                 bundleProps = allPlantSkus
             )
             scheduledBundles.put(makeScheduleEntry("Bundles", bSku))
-        }
-
-        // 6. Мега-пиньяты All Plants XP и пиньяты миров во вкладку Piñatas
-        val allXpPinatas = listOf(
-            Triple("custom.Pinata.All.Bronze", "All Plants XP (Bronze +100)", "free_all_xp_plants_bronze"),
-            Triple("custom.Pinata.All.Silver", "All Plants XP (Silver +1,000)", "free_all_xp_plants_silver"),
-            Triple("custom.Pinata.All.Gold", "All Plants XP (Gold +5,000)", "free_all_xp_plants_gold"),
-            Triple("custom.Pinata.All.Max", "All Plants XP (MEGA MAX +50,000)", "free_all_xp_plants_max"),
-            Triple("custom.Pinata.All.100M", "All Plants XP (100 MILLION)", "free_all_xp_plants_100000000")
-        )
-        for ((pSku, pTitle, pItem) in allXpPinatas) {
-            addStoreProduct(
-                sku = pSku,
-                name = pTitle,
-                desc = pTitle,
-                shortDesc = pTitle,
-                objectType = "pinata",
-                objectItem = pItem,
-                objectCount = 1
-            )
-            scheduledPinatas.put(makeScheduleEntry("Pinatas", pSku, "new"))
         }
 
         val worldPinatas = listOf(
@@ -876,13 +588,13 @@ object Pvz2Manager {
             "greens" to "Greens Piñata"
         )
         for ((pItem, pName) in worldPinatas) {
-            for (cnt in listOf(1, 100, 10000)) {
-                val pSku = "custom.Pinata.$pItem.$cnt"
+            for (cnt in listOf(1, 100)) {
+                val pSku = "shop.Pinata.$pItem.$cnt"
                 addStoreProduct(
                     sku = pSku,
-                    name = "$pName x$cnt",
-                    desc = "$cnt x $pName",
-                    shortDesc = pName,
+                    name = pName,
+                    desc = "STORE_CATEGORY_DAILY_OFFERS",
+                    shortDesc = "STORE_CATEGORY_DAILY_OFFERS",
                     objectType = "pinata",
                     objectItem = pItem,
                     objectCount = cnt
@@ -891,92 +603,55 @@ object Pvz2Manager {
             }
         }
 
-        // 7. Обычные + СИЛЬНО БОЛЬШИЕ ЗНАЧЕНИЯ (до 1 Миллиарда и Max 2.14B) для ВСЕХ ВАЛЮТ (после стандартных!) + УДАЛЕНИЕ ВАЛЮТ (DeleteItems)
-        val mainResourceDefs = listOf(
-            Triple("Coin", "coin", "Coins" to "DeletCoin"),
-            Triple("Gem", "gem", "Gems" to "DeletGem"),
-            Triple("Mint", "mint", "Mint" to "DeletMint"),
-            Triple("Ticket", "ticket", "Tickets" to "DeletTicket"),
-            Triple("Fuel", "fuel", "Fuel" to "DeletFuel"),
-            Triple("Sprout", "sprout", "Sprouts" to "DeletSprout")
-        )
-        val bigPositiveAmounts = listOf(
-            1, 10, 50, 100, 1000, 10000, 100000,
-            1000000, 10000000, 100000000, 1000000000, 2147483647
-        )
-        val negativeDeleteAmounts = listOf(
-            -1000, -10000, -100000, -1000000,
-            -10000000, -100000000, -1000000000
-        )
-
-        for ((prefix, objType, cats) in mainResourceDefs) {
-            val (posCat, delCat) = cats
-            for (amt in bigPositiveAmounts) {
-                val labelAmt = if (amt == 2147483647) "MAX (2.14B)" else amt.toString()
-                val rSku = "custom.$prefix.$amt"
-                addStoreProduct(
-                    sku = rSku,
-                    name = "$prefix $labelAmt",
-                    desc = "$labelAmt $posCat!",
-                    shortDesc = "$labelAmt $posCat",
-                    objectType = objType,
-                    objectItem = objType,
-                    objectCount = amt
-                )
-                scheduledResources.put(makeScheduleEntry(posCat, rSku))
-            }
-            for (negAmt in negativeDeleteAmounts) {
-                val absVal = kotlin.math.abs(negAmt)
-                val delSku = "custom.Delete.$prefix.$absVal"
-                addStoreProduct(
-                    sku = delSku,
-                    name = "Delete $negAmt $prefix",
-                    desc = "Remove $negAmt $posCat",
-                    shortDesc = "$negAmt $posCat",
-                    objectType = objType,
-                    objectItem = objType,
-                    objectCount = negAmt
-                )
-                scheduledDeleteItems.put(makeScheduleEntry(delCat, delSku))
-            }
+        for (costumeId in 1..342) {
+            val cSku = "shop.Costume.$costumeId"
+            addStoreProduct(
+                sku = cSku,
+                name = "Costume $costumeId",
+                desc = "Costume $costumeId",
+                shortDesc = "ALMANAC_COSTUME_DIALOG_TITLE",
+                objectType = "costume",
+                objectItem = costumeId.toString(),
+                objectCount = 1
+            )
+            scheduledCostumes.put(makeScheduleEntry("Costumes", cSku))
         }
 
-        // Дополнительные специальные валюты (Энергия ивентов, Жетоны пропуска рекламы, Ключи миров, Короны Арены)
-        val extraCurrencies = listOf(
-            Triple("EventEnergy", "eventenergy", "Tickets" to "DeletTicket"),
-            Triple("NoAdsToken", "iftoken", "Gems" to "DeletGem"),
-            Triple("WorldKey", "keygate", "Fuel" to "DeletFuel"),
-            Triple("ArenaCrown", "crown", "Tickets" to "DeletTicket")
+        for (upgId in Pvz2Database.GAME_UPGRADES) {
+            val uSku = "shop.Upgrade.$upgId"
+            addStoreProduct(
+                sku = uSku,
+                name = "Upgrade - $upgId",
+                desc = "STORE_CATEGORY_DAILY_OFFERS",
+                shortDesc = upgId,
+                objectType = "gameupgrade",
+                objectItem = upgId,
+                objectCount = 1
+            )
+            scheduledUpgrades.put(makeScheduleEntry("Upgrades", uSku))
+        }
+
+        val resourceDefs = listOf(
+            Triple("Coin", "coin", "Coins"),
+            Triple("Gem", "gem", "Gems"),
+            Triple("Mint", "mint", "Mint"),
+            Triple("Ticket", "ticket", "Tickets"),
+            Triple("Fuel", "fuel", "Fuel"),
+            Triple("Sprout", "sprout", "Sprouts")
         )
-        val extraAmounts = listOf(10, 100, 1000, 10000, 100000, 1000000)
-        for ((prefix, objType, cats) in extraCurrencies) {
-            val (posCat, delCat) = cats
-            for (amt in extraAmounts) {
-                val eSku = "custom.Extra.$prefix.$amt"
+        for ((prefix, objType, catName) in resourceDefs) {
+            for (amt in listOf(100, 1000, 10000, 100000, 1000000)) {
+                val rSku = "shop.$prefix.$amt"
                 addStoreProduct(
-                    sku = eSku,
-                    name = "$prefix +$amt",
-                    desc = "+$amt $prefix!",
-                    shortDesc = "+$amt $prefix",
+                    sku = rSku,
+                    name = "$prefix $amt",
+                    desc = "$amt $catName!",
+                    shortDesc = "COIN_STORE_TEXT",
                     objectType = objType,
                     objectItem = objType,
                     objectCount = amt
                 )
-                scheduledResources.put(makeScheduleEntry(posCat, eSku, "new"))
-            }
-            for (negAmt in listOf(-100, -10000, -1000000)) {
-                val absVal = kotlin.math.abs(negAmt)
-                val delSku = "custom.DeleteExtra.$prefix.$absVal"
-                addStoreProduct(
-                    sku = delSku,
-                    name = "Delete $negAmt $prefix",
-                    desc = "Remove $negAmt $prefix",
-                    shortDesc = "$negAmt $prefix",
-                    objectType = objType,
-                    objectItem = objType,
-                    objectCount = negAmt
-                )
-                scheduledDeleteItems.put(makeScheduleEntry(delCat, delSku))
+                scheduledResources.put(makeScheduleEntry(catName, rSku))
             }
         }
 
@@ -985,45 +660,17 @@ object Pvz2Manager {
             put("objects", productsArr)
         }
 
-        // 8. СНАЧАЛА ДОБАВЛЯЕМ ОРИГИНАЛЬНЫЕ РАСПИСАНИЯ ИГРЫ (чтобы обычные пакеты валют и товаров шли первыми!),
-        // А СРАЗУ ПОСЛЕ НИХ ДОБАВЛЯЕМ НАШИ КАСТОМНЫЕ БОЛЬШИЕ ПАКЕТЫ И ВСЕ НОВЫЕ ВКЛАДКИ!
-        val entriesArr = JSONArray()
-        val origSchedObjects = origScheduleJson?.optJSONArray("objects")
-        if (origSchedObjects != null && origSchedObjects.length() > 0) {
-            val existingEntries = origSchedObjects.getJSONObject(0)
-                .optJSONObject("objdata")
-                ?.optJSONArray("MarketScheduleEntries")
-            if (existingEntries != null) {
-                for (i in 0 until existingEntries.length()) {
-                    val entry = existingEntries.optJSONObject(i) ?: continue
-                    val schedProds = entry.optJSONArray("ScheduledProducts")
-                    if (schedProds != null) {
-                        for (j in 0 until schedProds.length()) {
-                            val sp = schedProds.optJSONObject(j) ?: continue
-                            if (sp.optInt("SoftCost", -1) > 0) {
-                                sp.put("SoftCurrency", "coins")
-                                sp.put("SoftCost", 1)
-                            }
-                            sp.put("MaxPurchase", -1)
-                            sp.put("SoftCostPerPurchase", -1)
-                        }
-                    }
-                    entriesArr.put(entry)
-                }
-            }
+        val entriesArr = JSONArray().apply {
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Bundles").put("ScheduledProducts", scheduledBundles))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Plants").put("ScheduledProducts", scheduledPlants))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds").put("ScheduledProducts", scheduledSeeds1))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds2").put("ScheduledProducts", scheduledSeeds2))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds3").put("ScheduledProducts", scheduledSeeds3))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Pinatas").put("ScheduledProducts", scheduledPinatas))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Costumes").put("ScheduledProducts", scheduledCostumes))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Upgrades").put("ScheduledProducts", scheduledUpgrades))
+            put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Resources").put("ScheduledProducts", scheduledResources))
         }
-
-        // Следом за оригинальными товарами дописываем наши полные вкладки и большие значения валют:
-        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Resources").put("ScheduledProducts", scheduledResources))
-        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Plants").put("ScheduledProducts", scheduledPlants))
-        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Costumes").put("ScheduledProducts", scheduledCostumes))
-        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds").put("ScheduledProducts", scheduledSeeds1))
-        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds2").put("ScheduledProducts", scheduledSeeds2))
-        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Seeds3").put("ScheduledProducts", scheduledSeeds3))
-        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Bundles").put("ScheduledProducts", scheduledBundles))
-        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Pinatas").put("ScheduledProducts", scheduledPinatas))
-        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Upgrades").put("ScheduledProducts", scheduledUpgrades))
-        entriesArr.put(JSONObject().put("StartDateTime", 0).put("EndDateTime", 0).put("Name", "Delet").put("ScheduledProducts", scheduledDeleteItems))
 
         val finalScheduleJson = JSONObject().apply {
             put("version", 1)
@@ -1037,71 +684,41 @@ object Pvz2Manager {
         return finalProductsJson to finalScheduleJson
     }
 
-    // ==================== 2. МОМЕНТАЛЬНАЯ ПЕРЕЗАРЯДКА (-999) И ОТРИЦАТЕЛЬНАЯ ЦЕНА СОЛНЦА (-500) ====================
+    // ==================== 2. МОД: 0 СОЛНЦА И МГНОВЕННАЯ ПЕРЕЗАРЯДКА ====================
 
-    fun patchZeroSunAndInstantCooldown(
-        cdnDir: String,
-        useNegativeSunBonus: Boolean = true,
-        log: (String) -> Unit
-    ): Boolean {
-        val targetSunValue = if (useNegativeSunBonus) -500 else 0
-        val targetCooldownValue = -999
+    fun patchZeroSunAndInstantCooldown(cdnDir: String, log: (String) -> Unit): Boolean {
+        val propsPath = "$cdnDir/PlantProperties.rton"
+        val levelsPath = "$cdnDir/PlantLevels.rton"
+        var anyPatched = false
 
-        val allCdnDirs = listAllCdnDirs().ifEmpty { listOf(cdnDir) }.toMutableSet().apply { add(cdnDir) }
-        var patchedFilesCount = 0
-
-        for (dir in allCdnDirs) {
-            val candidateFiles = listOf(
-                "$dir/PlantLevels.rton",
-                "$dir/plantlevels.rton",
-                "$dir/PlantProperties.rton",
-                "$dir/plantproperties.rton"
-            )
-            for (filePath in candidateFiles) {
-                val json = readRtonAsJson(filePath) {} ?: continue
-                applyInstantAndSunPatchRecursively(json, targetSunValue, targetCooldownValue)
-                if (writeJsonAsRton(filePath, json, log)) {
-                    patchedFilesCount++
-                }
-            }
+        readRtonAsJson(propsPath, log)?.let { json ->
+            zeroSunAndCooldownRecursively(json)
+            if (writeJsonAsRton(propsPath, json, log)) anyPatched = true
         }
-
-        if (patchedFilesCount > 0) {
-            val modeDesc = if (useNegativeSunBonus) "Цена = -500 солнца (даёт +500☀️ при посадке!)" else "Цена = 0 солнца"
-            log("🌞 Успешно пропатчено файлов: $patchedFilesCount! ($modeDesc, Перезарядка = -999 / Мгновенная!)")
-            return true
-        } else {
-            log("❌ В папке $cdnDir не найдены файлы PlantLevels.rton / PlantProperties.rton!")
-            return false
+        readRtonAsJson(levelsPath, log)?.let { json ->
+            zeroSunAndCooldownRecursively(json)
+            if (writeJsonAsRton(levelsPath, json, log)) anyPatched = true
         }
+        if (anyPatched) {
+            log("🌞 Мод успешно применён: все растения стоят 0 солнца и перезаряжаются за 0 сек!")
+        }
+        return anyPatched
     }
 
-    private fun applyInstantAndSunPatchRecursively(
-        node: Any?,
-        sunCostVal: Int,
-        cooldownVal: Int
-    ) {
+    private fun zeroSunAndCooldownRecursively(node: Any?) {
         when (node) {
             is JSONObject -> {
                 val statName = node.optString("Name", "")
                 if (statName.equals("Cost", ignoreCase = true) ||
-                    statName.equals("SunCost", ignoreCase = true)
-                ) {
-                    val valuesArr = node.optJSONArray("Values")
-                    if (valuesArr != null) {
-                        for (i in 0 until valuesArr.length()) {
-                            valuesArr.put(i, sunCostVal)
-                        }
-                    }
-                } else if (statName.equals("PacketCooldown", ignoreCase = true) ||
+                    statName.equals("SunCost", ignoreCase = true) ||
+                    statName.equals("PacketCooldown", ignoreCase = true) ||
                     statName.equals("StartingCooldown", ignoreCase = true) ||
-                    statName.equals("Cooldown", ignoreCase = true) ||
-                    statName.equals("FirstPacketCooldown", ignoreCase = true)
+                    statName.equals("Cooldown", ignoreCase = true)
                 ) {
                     val valuesArr = node.optJSONArray("Values")
                     if (valuesArr != null) {
                         for (i in 0 until valuesArr.length()) {
-                            valuesArr.put(i, cooldownVal)
+                            valuesArr.put(i, 0)
                         }
                     }
                 }
@@ -1109,34 +726,28 @@ object Pvz2Manager {
                 val keys = node.keys().asSequence().toList()
                 for (k in keys) {
                     val v = node.opt(k)
-                    if (k.equals("Cost", ignoreCase = true) || k.equals("SunCost", ignoreCase = true)) {
-                        if (v is Number) node.put(k, sunCostVal)
-                        if (v is JSONArray) {
-                            for (i in 0 until v.length()) v.put(i, sunCostVal)
-                        }
-                    } else if (k.equals("PacketCooldown", ignoreCase = true) ||
+                    if (k.equals("Cost", ignoreCase = true) ||
+                        k.equals("SunCost", ignoreCase = true) ||
+                        k.equals("PacketCooldown", ignoreCase = true) ||
                         k.equals("StartingCooldown", ignoreCase = true) ||
-                        k.equals("Cooldown", ignoreCase = true) ||
-                        k.equals("FirstPacketCooldown", ignoreCase = true)
+                        k.equals("Cooldown", ignoreCase = true)
                     ) {
-                        if (v is Number) node.put(k, cooldownVal)
+                        if (v is Number) node.put(k, 0)
                         if (v is JSONArray) {
-                            for (i in 0 until v.length()) v.put(i, cooldownVal)
+                            for (i in 0 until v.length()) v.put(i, 0)
                         }
                     } else {
-                        applyInstantAndSunPatchRecursively(v, sunCostVal, cooldownVal)
+                        zeroSunAndCooldownRecursively(v)
                     }
                 }
             }
             is JSONArray -> {
                 for (i in 0 until node.length()) {
-                    applyInstantAndSunPatchRecursively(node.opt(i), sunCostVal, cooldownVal)
+                    zeroSunAndCooldownRecursively(node.opt(i))
                 }
             }
         }
     }
-
-    // ==================== 3. ПРОКАЧКА ЛУТА ПИНЬЯТ И МЕГА-НАГРАДЫ АРЕНЫ ====================
 
     fun patchPinataCoreLoot(cdnDir: String, multiplier: Int, minSeedsPerSlot: Int, log: (String) -> Unit): Boolean {
         val path = "$cdnDir/pinatacoreloot.rton"
