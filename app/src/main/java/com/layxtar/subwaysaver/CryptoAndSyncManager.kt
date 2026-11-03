@@ -3,7 +3,6 @@ package com.layxtar.subwaysaver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import rikka.shizuku.Shizuku
@@ -143,8 +142,6 @@ object CryptoAndSyncManager {
         return DEFAULT_GAME_PROFILE_PATH
     }
 
-    // ==================== БЫСТРОЕ ПОТОКОВОЕ ЧТЕНИЕ И ЗАПИСЬ ЧЕРЕЗ STDIN / STDOUT (В 50 РАЗ БЫСТРЕЕ) ====================
-
     fun readFileViaShizuku(path: String, log: (String) -> Unit): ByteArray? {
         return try {
             val process = createShellProcess("cat '$path' 2>/dev/null")
@@ -152,7 +149,7 @@ object CryptoAndSyncManager {
             val code = process.waitFor()
             if (code == 0 && bytes.isNotEmpty()) bytes else null
         } catch (e: Exception) {
-            log("❌ Ошибка чтения файла ($path):${e.message}")
+            log("❌ Ошибка чтения файла ($path): ${e.message}")
             null
         }
     }
@@ -162,10 +159,8 @@ object CryptoAndSyncManager {
         val tempFile = "/data/local/tmp/ce_fast_$uuid"
 
         return try {
-            // Создаём резервную копию оригинала только если её ещё нет, чтобы не затереть чистый бэкап
             execSh("if [ -f '$path' ] && [ ! -f '$path.bak_editor' ]; then cp '$path' '$path.bak_editor'; fi 2>/dev/null")
 
-            // Заливаем массив байтов напрямую в stdin одного процесса cat за 0.05 сек!
             val writeProc = createShellProcess("cat > '$tempFile'")
             writeProc.outputStream.use { out ->
                 out.write(data)
@@ -188,14 +183,12 @@ object CryptoAndSyncManager {
             val (_, result) = execSh(copyCmd)
             result.contains("WRITE_OK")
         } catch (e: Exception) {
-            log("❌ Ошибка быстрой записи ($path):${e.message}")
+            log("❌ Ошибка быстрой записи ($path): ${e.message}")
             false
         } finally {
             try { execSh("rm -f '$tempFile' 2>/dev/null") } catch (_: Exception) { }
         }
     }
-
-    // ==================== МУЛЬТИ-БЭКАПЫ С ДАТОЙ В ПАПКУ /DOWNLOAD ====================
 
     fun exportBackupToDownload(sourcePath: String, gameTag: String, log: (String) -> Unit): Boolean {
         val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
@@ -209,32 +202,33 @@ object CryptoAndSyncManager {
         return ok
     }
 
-    fun listDownloadBackups(gameTag: String): List<String> {
-        val destDir = "$EXTERNAL_BACKUP_DIR/$gameTag"
-        val (_, out) = execSh("ls -1t '$destDir'/*.bak 2>/dev/null")
-        return out.lines().map { it.trim() }.filter { it.isNotEmpty() }
-    }
-
-    fun restoreFromDownloadBackup(backupFilePath: String, targetGamePath: String, pkgToStop: String, log: (String) -> Unit): Boolean {
-        stopGameForSync(pkgToStop, true, log)
-        val (_, out) = execSh("cp '$backupFilePath' '$targetGamePath' && sync && echo 'IMPORT_OK'")
-        val ok = out.contains("IMPORT_OK")
-        if (ok) log("⏪ Восстановлен сейв: ${File(backupFilePath).name}") else log("❌ Ошибка восстановления бэкапа!")
-        return ok
-    }
-
     fun stopGameForSync(packageName: String = PKG_CITY, hardStop: Boolean = true, log: (String) -> Unit) {
         if (hardStop) execSh("am force-stop $packageName") else execSh("am kill $packageName")
     }
 
+    // Надёжный запуск любой игры (включая Best Fiends) через разрешение главной Activity в Shizuku
     fun launchGame(context: Context, packageName: String = PKG_CITY, log: (String) -> Unit) {
         log("🚀 Запускаем $packageName...")
-        val (code, _) = execSh("monkey -p $packageName -c android.intent.category.LAUNCHER 1")
-        if (code != 0) {
-            val intent = context.packageManager?.getLaunchIntentForPackage(packageName)
-            if (intent != null) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
+        val launchCmd = """
+            comp=$(cmd package resolve-activity --brief -c android.intent.category.LAUNCHER $packageName 2>/dev/null | tail -n 1)
+            if [ -n "${'$'}comp" ] && echo "${'$'}comp" | grep -q "/"; then
+                am start -n "${'$'}comp" --activity-Single-top 2>/dev/null && echo 'LAUNCH_OK'
+            else
+                monkey -p $packageName -c android.intent.category.LAUNCHER 1 2>/dev/null && echo 'LAUNCH_OK'
+            fi
+        """.trimIndent()
+        val (_, out) = execSh(launchCmd)
+        if (!out.contains("LAUNCH_OK")) {
+            try {
+                val intent = context.packageManager?.getLaunchIntentForPackage(packageName)
+                if (intent != null) {
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                } else {
+                    log("⚠️ Не удалось найти стартовую Activity для $packageName")
+                }
+            } catch (e: Exception) {
+                log("❌ Ошибка запуска: ${e.message}")
             }
         }
     }
@@ -245,15 +239,14 @@ object CryptoAndSyncManager {
         return out.contains("RESTORED")
     }
 
-    // Конструктор цветного / градиентного никнейма для Unity Rich Text (Subway Surfers City)
     fun buildColoredUnityName(rawName: String, hexColorStart: String, hexColorEnd: String? = null): String {
         val clean = rawName.replace(Regex("<[^>]*>"), "").trim()
         if (clean.isEmpty()) return ""
-        val c1 = hexColorStart.removePrefix("#")
+        val c1 = hexColorStart.removePrefix("#").padEnd(6, '0').take(6)
         if (hexColorEnd.isNullOrBlank()) {
             return "<color=#$c1>$clean</color>"
         }
-        val c2 = hexColorEnd.removePrefix("#")
+        val c2 = hexColorEnd.removePrefix("#").padEnd(6, '0').take(6)
         val r1 = c1.substring(0, 2).toIntOrNull(16) ?: 255
         val g1 = c1.substring(2, 4).toIntOrNull(16) ?: 0
         val b1 = c1.substring(4, 6).toIntOrNull(16) ?: 0
@@ -298,7 +291,12 @@ object CryptoAndSyncManager {
         }
 
         val containerJson = JSONObject(String(decrypted, Charsets.UTF_8))
-        val innerProfileJson = JSONObject(containerJson.getString("profile"))
+        val profileRaw = containerJson.opt("profile")
+        val innerProfileJson = when (profileRaw) {
+            is JSONObject -> profileRaw
+            is String -> JSONObject(profileRaw)
+            else -> JSONObject()
+        }
         return containerJson to innerProfileJson
     }
 
@@ -348,14 +346,150 @@ object CryptoAndSyncManager {
         }
     }
 
+    // ==================== БЕЗОПАСНОЕ ЧТЕНИЕ И ЗАПИСЬ ВАЛЮТ SUBWAY SURFERS CITY ====================
+    // Поддерживает любые форматы хранения (массив currencies/items/wallet или словарь по ключам) без JSONException!
+
+    fun readCityCurrencies(inner: JSONObject): Map<Long, Long> {
+        val result = mutableMapOf<Long, Long>()
+
+        fun parseArray(arr: JSONArray?) {
+            if (arr == null) return
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val id = when {
+                    item.has("id") -> item.optLong("id", 0L)
+                    item.has("dataTag") -> item.optLong("dataTag", 0L)
+                    item.has("currencyId") -> item.optLong("currencyId", 0L)
+                    item.has("type") -> item.optLong("type", 0L)
+                    else -> 0L
+                }
+                val amt = when {
+                    item.has("amount") -> item.optLong("amount", 0L)
+                    item.has("value") -> item.optLong("value", 0L)
+                    item.has("count") -> item.optLong("count", 0L)
+                    else -> 0L
+                }
+                if (id != 0L) result[id] = amt
+            }
+        }
+
+        fun parseDict(obj: JSONObject?) {
+            if (obj == null) return
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                val id = k.toLongOrNull()
+                if (id != null) {
+                    val v = obj.opt(k)
+                    when (v) {
+                        is Number -> result[id] = v.toLong()
+                        is JSONObject -> result[id] = v.optLong("amount", v.optLong("value", 0L))
+                    }
+                }
+            }
+        }
+
+        val walletNode = inner.opt("wallet")
+        when (walletNode) {
+            is JSONArray -> parseArray(walletNode)
+            is JSONObject -> {
+                parseArray(walletNode.optJSONArray("currencies"))
+                parseArray(walletNode.optJSONArray("items"))
+                parseDict(walletNode.optJSONObject("currencies"))
+                parseDict(walletNode)
+            }
+        }
+        parseArray(inner.optJSONArray("currencies"))
+        parseDict(inner.optJSONObject("currencies"))
+        parseArray(inner.optJSONArray("inventory"))
+
+        return result
+    }
+
+    fun writeCityCurrencies(inner: JSONObject, newValues: Map<Long, Long>) {
+        fun updateArray(arr: JSONArray): JSONArray {
+            val idField = if (arr.length() > 0) {
+                val first = arr.optJSONObject(0)
+                when {
+                    first?.has("dataTag") == true -> "dataTag"
+                    first?.has("currencyId") == true -> "currencyId"
+                    else -> "id"
+                }
+            } else "id"
+
+            val amtField = if (arr.length() > 0) {
+                val first = arr.optJSONObject(0)
+                when {
+                    first?.has("value") == true -> "value"
+                    first?.has("count") == true -> "count"
+                    else -> "amount"
+                }
+            } else "amount"
+
+            val existing = mutableMapOf<Long, JSONObject>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val id = obj.optLong(idField, obj.optLong("id", 0L))
+                if (id != 0L) existing[id] = obj
+            }
+            for ((tag, amt) in newValues) {
+                val obj = existing[tag]
+                if (obj != null) {
+                    obj.put(amtField, amt)
+                } else {
+                    arr.put(JSONObject().put(idField, tag).put(amtField, amt))
+                }
+            }
+            return arr
+        }
+
+        fun updateDict(dict: JSONObject) {
+            for ((tag, amt) in newValues) {
+                val k = tag.toString()
+                val cur = dict.opt(k)
+                if (cur is JSONObject) {
+                    if (cur.has("value")) cur.put("value", amt) else cur.put("amount", amt)
+                } else {
+                    dict.put(k, amt)
+                }
+            }
+        }
+
+        val walletNode = inner.opt("wallet")
+        when (walletNode) {
+            is JSONArray -> inner.put("wallet", updateArray(walletNode))
+            is JSONObject -> {
+                when {
+                    walletNode.opt("currencies") is JSONArray ->
+                        walletNode.put("currencies", updateArray(walletNode.getJSONArray("currencies")))
+                    walletNode.opt("items") is JSONArray ->
+                        walletNode.put("items", updateArray(walletNode.getJSONArray("items")))
+                    walletNode.opt("currencies") is JSONObject ->
+                        updateDict(walletNode.getJSONObject("currencies"))
+                    else -> updateDict(walletNode)
+                }
+            }
+            else -> {
+                when {
+                    inner.opt("currencies") is JSONArray ->
+                        inner.put("currencies", updateArray(inner.getJSONArray("currencies")))
+                    inner.opt("currencies") is JSONObject ->
+                        updateDict(inner.getJSONObject("currencies"))
+                    else -> inner.put("wallet", updateArray(JSONArray()))
+                }
+            }
+        }
+    }
+
     // ==================== МЕТОДЫ ПРОФИЛЯ SUBWAY SURFERS CITY ====================
 
     fun parseCitySurfers(profile: JSONObject): List<CitySurferState> {
         val currentArray = profile.optJSONArray("surferProfiles") ?: JSONArray()
         val map = mutableMapOf<Long, JSONObject>()
         for (i in 0 until currentArray.length()) {
-            val obj = currentArray.getJSONObject(i)
-            map[obj.getLong("id")] = obj
+            val obj = currentArray.optJSONObject(i) ?: continue
+            val id = obj.optLong("id", 0L)
+            if (id != 0L) map[id] = obj
         }
 
         return GameDatabase.SURFERS.map { (id, name) ->
@@ -392,9 +526,10 @@ object CryptoAndSyncManager {
         val arr = profile.optJSONArray("surferSkinProfiles") ?: return emptySet()
         val res = mutableSetOf<Long>()
         for (i in 0 until arr.length()) {
-            val obj = arr.getJSONObject(i)
+            val obj = arr.optJSONObject(i) ?: continue
             if (obj.optBoolean("isUnlocked", false)) {
-                res.add(obj.getLong("id"))
+                val id = obj.optLong("id", 0L)
+                if (id != 0L) res.add(id)
             }
         }
         return res
@@ -418,8 +553,9 @@ object CryptoAndSyncManager {
         val currentArray = profile.optJSONArray("boardProfiles") ?: JSONArray()
         val map = mutableMapOf<Long, JSONObject>()
         for (i in 0 until currentArray.length()) {
-            val obj = currentArray.getJSONObject(i)
-            map[obj.getLong("id")] = obj
+            val obj = currentArray.optJSONObject(i) ?: continue
+            val id = obj.optLong("id", 0L)
+            if (id != 0L) map[id] = obj
         }
         return GameDatabase.BOARDS.map { (id, name) ->
             val obj = map[id]
@@ -452,10 +588,12 @@ object CryptoAndSyncManager {
         val existingSkins = mutableMapOf<Long, Int>()
         val existingScores = mutableMapOf<Long, Long>()
         for (i in 0 until currentArray.length()) {
-            val obj = currentArray.getJSONObject(i)
-            val sId = obj.getLong("id")
-            existingSkins[sId] = obj.optInt("selectedSkin", 0)
-            existingScores[sId] = obj.optLong("highScore", 0L)
+            val obj = currentArray.optJSONObject(i) ?: continue
+            val sId = obj.optLong("id", 0L)
+            if (sId != 0L) {
+                existingSkins[sId] = obj.optInt("selectedSkin", 0)
+                existingScores[sId] = obj.optLong("highScore", 0L)
+            }
         }
         val newArray = JSONArray()
         for ((id, _) in GameDatabase.SURFERS) {
@@ -464,7 +602,7 @@ object CryptoAndSyncManager {
                 put("level", 20)
                 put("isUnlocked", true)
                 put("wasSeen", true)
-                put("highScore", existingScores[id] ?: 0L) // Никаких случайных рекордов!
+                put("highScore", existingScores[id] ?: 0L)
                 put("selectedSkin", existingSkins[id] ?: 0)
             })
         }
@@ -509,9 +647,9 @@ object CryptoAndSyncManager {
         val goals = profile.optJSONArray("goals") ?: JSONArray()
         val existingGoalIds = mutableSetOf<String>()
         for (i in 0 until goals.length()) {
-            val g = goals.getJSONObject(i)
+            val g = goals.optJSONObject(i) ?: continue
             g.put("completed", true)
-            existingGoalIds.add(g.getString("id"))
+            existingGoalIds.add(g.optString("id"))
         }
         val stageCounts = mapOf(1 to 32, 2 to 36, 3 to 36, 4 to 36, 5 to 36, 6 to 20)
         for ((districtNum, maxStage) in stageCounts) {
@@ -530,7 +668,7 @@ object CryptoAndSyncManager {
     fun completeAllDailyAndWeeklyMissions(profile: JSONObject) {
         val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
         for (i in 0 until missions.length()) {
-            val m = missions.getJSONObject(i)
+            val m = missions.optJSONObject(i) ?: continue
             val curProg = m.optInt("progress", 0)
             m.put("progress", maxOf(curProg, 100000))
             m.put("isComplete", true)
@@ -563,74 +701,11 @@ object CryptoAndSyncManager {
         profile.put("counters", counters)
     }
 
-    fun toggleSinglePurchase(profile: JSONObject, productId: String, unlocked: Boolean) {
-        val purchaseHistory = profile.optJSONObject("purchaseHistory") ?: JSONObject()
-        if (unlocked) {
-            val nowIso = Instant.now().toString()
-            purchaseHistory.put(productId, JSONObject().put("PurchaseCount", 1).put("PurchaseDates", JSONArray().put(nowIso)))
-            if (productId == "premium_pass") {
-                profile.put("seasonPassPurchased", true)
-                profile.put("hasSeenPremiumPassActivation", true)
-            }
-        } else {
-            purchaseHistory.remove(productId)
-        }
-        profile.put("purchaseHistory", purchaseHistory)
-    }
-
-    fun configurePiggyBank(
-        profile: JSONObject,
-        piggyId: String,
-        missionId: Long,
-        progressAmount: Int,
-        isFilled: Boolean,
-        makeFreeToClaim: Boolean = true
-    ) {
-        profile.put("piggyBank", JSONObject().apply {
-            put("currentId", piggyId)
-            put("lastSeenProgress", progressAmount)
-            put("skippedCount", 0)
-            put("lastSentAnalyticsProgress", 10)
-            put("isFilled", isFilled)
-        })
-
-        if (makeFreeToClaim) {
-            val purchaseHistory = profile.optJSONObject("purchaseHistory") ?: JSONObject()
-            val nowIso = Instant.now().toString()
-            for ((pId, _) in GameDatabase.PIGGY_BANKS) {
-                purchaseHistory.put(pId, JSONObject().put("PurchaseCount", 1).put("PurchaseDates", JSONArray().put(nowIso)))
-            }
-            profile.put("purchaseHistory", purchaseHistory)
-        }
-
-        val missions = profile.optJSONArray("missionProgresses") ?: JSONArray()
-        var found = false
-        for (i in 0 until missions.length()) {
-            val m = missions.getJSONObject(i)
-            if (m.optString("featureType") == "PiggyBank" || m.optLong("id") == missionId) {
-                m.put("id", missionId); m.put("progress", progressAmount)
-                m.put("isComplete", isFilled); m.put("isClaimed", false)
-                m.put("featureType", "PiggyBank")
-                found = true
-            }
-        }
-        if (!found) {
-            missions.put(JSONObject().apply {
-                put("id", missionId); put("progress", progressAmount)
-                put("isComplete", isFilled); put("isClaimed", false)
-                put("creationUnixTimestamp", 0)
-                put("creationUnixTimestampSeconds", Instant.now().epochSecond)
-                put("featureType", "PiggyBank")
-            })
-        }
-        profile.put("missionProgresses", missions)
-    }
-
     fun unlockAllEventTrialsAnd3StarMissions(profile: JSONObject) {
         val goals = profile.optJSONArray("goals") ?: JSONArray()
         val existingGoalIds = mutableSetOf<String>()
         for (i in 0 until goals.length()) {
-            val g = goals.getJSONObject(i)
+            val g = goals.optJSONObject(i) ?: continue
             g.put("completed", true)
             existingGoalIds.add(g.optString("id"))
         }
@@ -671,7 +746,7 @@ object CryptoAndSyncManager {
         val trials = profile.optJSONArray("dailyTrials")
         if (trials != null) {
             for (i in 0 until trials.length()) {
-                trials.getJSONObject(i).apply {
+                trials.optJSONObject(i)?.apply {
                     put("attempts", 0)
                     put("claimedGoalRewards", 0)
                 }
@@ -729,7 +804,7 @@ object CryptoAndSyncManager {
         for ((achId, target) in GameDatabase.ACHIEVEMENT_MISSIONS) {
             var exists = false
             for (i in 0 until missions.length()) {
-                val m = missions.getJSONObject(i)
+                val m = missions.optJSONObject(i) ?: continue
                 if (m.optLong("id") == achId) {
                     m.put("progress", target); m.put("isComplete", true); m.put("isClaimed", false)
                     exists = true
@@ -750,7 +825,7 @@ object CryptoAndSyncManager {
 
     fun upsertCounter(counters: JSONArray, type: String, id: String, count: Int) {
         for (i in 0 until counters.length()) {
-            val c = counters.getJSONObject(i)
+            val c = counters.optJSONObject(i) ?: continue
             if (c.optString("CounterType") == type && c.optString("Id") == id) {
                 c.put("Count", count)
                 return
