@@ -44,9 +44,12 @@ fun MultiGameEditorRoot(activity: ComponentActivity) {
     var logs by remember { mutableStateOf("🚀 Старт модульного редактора...\n") }
     val stateHolder = rememberSaveableStateHolder()
 
+    // Потокобезопасное обновление стейта Compose из любого фонового потока (Dispatchers.IO)
     fun log(msg: String) {
-        statusText = msg
-        logs = "$msg\n$logs"
+        activity.runOnUiThread {
+            statusText = msg
+            logs = "$msg\n$logs"
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
